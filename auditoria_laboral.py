@@ -1252,7 +1252,7 @@ def exportar_excel(
 
         ws.set_row(0, 28)
         ws.set_row(1, 20)
-        ws.merge_range(0, 0, 0, len(COLUMNAS_SALIDA) - 1, "MATRIZ DE AUDITORÍA LABORAL DE SUBCONTRATISTAS", titulo)
+        ws.merge_range(0, 0, 0, len(COLUMNAS_SALIDA) - 1, "GALANT | MATRIZ DE AUDITORÍA DOCUMENTAL", titulo)
         ws.merge_range(1, 0, 1, len(COLUMNAS_SALIDA) - 1, f"Generado: {datetime.now():%Y-%m-%d %H:%M} | No calcula tasas de cotización", subtitulo)
         ws.set_row(2, 32)
         for j, col in enumerate(COLUMNAS_SALIDA):
