@@ -40,49 +40,68 @@ def diagnostico_local(pregunta: str) -> str:
     return ("Puedo ayudarte a describir el error. Indica tipo de documento, "
             "campo que falló y página, sin aportar datos personales.")
 
-def respuesta_ia(pregunta: str, resumen: dict, historial: list[dict],
-                 clave: str, modelo: str = "gpt-5-mini") -> str:
-    from openai import OpenAI
+def respuesta_ia(
+    pregunta: str,
+    resumen: dict,
+    historial: list[dict],
+    clave: str,
+    modelo: str = "gemini-3.5-flash-lite",
+) -> str:
+    """Consulta Gemini usando solo mensajes parcialmente anonimizados."""
+    from gemini_cliente import consultar_gemini
+
     mensajes = [
-        {"role": m["role"], "content": anonimizar(m["content"])}
-        for m in historial[-6:] if m.get("role") in ("user", "assistant")
+        {"role": m["role"], "content": anonimizar(m.get("content", ""))}
+        for m in historial[-6:]
+        if m.get("role") in ("user", "assistant")
     ]
-    mensajes.append({"role": "user", "content": anonimizar(pregunta)})
-    respuesta = OpenAI(api_key=clave, timeout=22.0, max_retries=1).responses.create(
-        model=modelo, store=False, max_output_tokens=500,
-        instructions=(
-            "Asistente de auditoría laboral chilena. Sé claro. Explica qué puede estar mal "
-            "y cómo cotejarlo. Distingue OCR, datos incompletos y diferencias reales. "
-            "No afirmes haber editado archivos, validado la DT ni corregido montos. "
-            "No inventes cifras. Sugiere revisión humana. Resumen estadístico: "
-            + json.dumps(resumen, ensure_ascii=False)
-        ),
-        input=mensajes,
+    return consultar_gemini(
+        pregunta=anonimizar(pregunta),
+        resumen=resumen,
+        historial=mensajes,
+        clave=clave,
+        modelo=modelo,
     )
-    return respuesta.output_text or "No se obtuvo respuesta."
+
 
 def mostrar_chat(reporte: dict | None):
     st.divider()
-    st.subheader("Asistente de auditoría")
-    st.caption("Explica errores de lectura y sugiere verificaciones. No cambia automáticamente la auditoría.")
+    st.subheader("Asistente con Gemini")
+    st.caption("Conversación con Gemini para explicar errores de F30-1 y Previred. No modifica la auditoría.")
     try:
-        clave = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
-        modelo = str(st.secrets.get("OPENAI_MODEL", "gpt-5-mini"))
+        clave = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+        modelo = str(st.secrets.get("GEMINI_MODEL", "gemini-3.5-flash-lite")).strip()
     except Exception:
-        clave, modelo = "", "gpt-5-mini"
-    with st.expander("IA, privacidad y consentimiento"):
-        st.write("Sin clave funciona como ayuda local. Con API, se envía tu pregunta anonimizada "
-                 "y un resumen de cantidades; jamás los PDF ni las nóminas. "
-                 "El filtrado de datos no garantiza quitar los nombres que escribas manualmente.")
-        consentimiento = st.checkbox("Acepto enviar preguntas anonimizadas a OpenAI", key="chat_consentimiento")
-        if not clave:
-            st.caption("Para activar la IA configura OPENAI_API_KEY en los secretos de Streamlit.")
+        clave, modelo = "", "gemini-3.5-flash-lite"
+
+    with st.expander("Privacidad y autorización de Gemini", expanded=bool(clave)):
+        st.write(
+            "Al utilizar Gemini, Google recibe tu pregunta (con RUT, correos y teléfonos "
+            "reemplazados), respuestas previas y estadísticas generales. NO enviamos "
+            "los PDFs, la nómina completa ni los archivos Excel. "
+            "El filtrado NO garantiza ocultar nombres o datos personales que escribas."
+        )
+        st.warning(
+            "En la modalidad gratuita Google puede usar contenido para mejorar sus productos. "
+            "No escribas nombres, RUT, remuneraciones individuales ni otros datos personales."
+        )
+        consentimiento = st.checkbox(
+            "Autorizo enviar a Gemini preguntas sin datos personales",
+            key="gemini_consentimiento",
+        )
     if clave and consentimiento:
-        st.success("IA de OpenAI habilitada para este chat.")
+        if st.session_state.get("gemini_respuesta_confirmada"):
+            st.success("Gemini conectado: se recibió una respuesta correctamente.")
+        else:
+            st.info("Clave de Gemini configurada. Escribe una pregunta para comprobar la conexión.")
     elif clave:
-        st.info("API configurada. Activa tu consentimiento en IA, privacidad y consentimiento para conversar con la IA.")
+        st.info("Gemini configurado. Activa la autorización de privacidad para conversar.")
     else:
-        st.warning("Chat con IA no conectado: falta OPENAI_API_KEY en los secretos de Streamlit. Disponible solo la ayuda local.")
+        st.warning(
+            "Gemini todavía no está conectado. Crea una clave gratis en Google AI Studio "
+            "y agrégala a Secrets de Streamlit con el nombre GEMINI_API_KEY."
+        )
+        st.link_button("Crear clave gratis en Google AI Studio", "https://aistudio.google.com/api-keys")
     historial = st.session_state.setdefault("historial_asistente", [])
     for mensaje in historial[-12:]:
         with st.chat_message(mensaje["role"]):
@@ -95,10 +114,20 @@ def mostrar_chat(reporte: dict | None):
             st.write(pregunta)
         with st.chat_message("assistant"):
             try:
-                texto = (respuesta_ia(pregunta, resumen_seguro(reporte), previo, clave, modelo)
-                         if clave and consentimiento else diagnostico_local(pregunta))
-            except Exception:
-                texto = "No fue posible consultar la API. La auditoría sigue sin cambios. Revisa la clave o el saldo."
+                if clave and consentimiento:
+                    texto = respuesta_ia(
+                        pregunta, resumen_seguro(reporte), previo, clave, modelo
+                    )
+                    st.session_state["gemini_respuesta_confirmada"] = True
+                else:
+                    texto = diagnostico_local(pregunta)
+            except Exception as exc:
+                from gemini_cliente import GeminiError
+                texto = (
+                    str(exc) if isinstance(exc, GeminiError)
+                    else "No se pudo consultar Gemini. La auditoría no cambió."
+                )
+                st.session_state["gemini_respuesta_confirmada"] = False
             st.write(texto)
         historial.append({"role": "assistant", "content": texto})
         del historial[:-12]
