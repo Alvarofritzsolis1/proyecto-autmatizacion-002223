@@ -88,8 +88,10 @@ def _pagina_texto(pagina, psm=3) -> tuple[str, str]:
             rotacion = 0
         # Una orientación OSD válida suele ahorrar 2 pasadas adicionales;
         # si no existe, intentar ambos giros laterales y luego 180 grados.
-        candidatos = ([rotacion] if rotacion in (90, 180, 270) else
-                      [90, 270, 180])
+        candidatos = (
+            [rotacion] + [a for a in (90, 270, 180) if a != rotacion]
+            if rotacion in (90, 180, 270) else [90, 270, 180]
+        )
         mejor = (_puntos_f301(texto), len(texto))
         for angulo in candidatos:
             try:
