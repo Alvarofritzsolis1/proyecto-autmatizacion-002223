@@ -153,7 +153,12 @@ def _celda(anexo, indice, campo, escala):
 
 
 def _numero(texto):
-    limpio = re.sub(r"[^0-9.]", "", texto or "")
+    # No interpretar una letra OCR (O confundida con cero) como un número.
+    # Se aceptan puntos de miles, separadores y bordes de celda solamente.
+    bruto = (texto or "").strip()
+    if re.search(r"[^0-9.,\s|]", bruto):
+        return None
+    limpio = re.sub(r"[^0-9.]", "", bruto)
     if not re.fullmatch(r"\d{1,3}(?:\.\d{3})+|\d+", limpio):
         return None
     return int(limpio.replace(".", ""))
