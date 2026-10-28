@@ -77,6 +77,12 @@ def mostrar_chat(reporte: dict | None):
         consentimiento = st.checkbox("Acepto enviar preguntas anonimizadas a OpenAI", key="chat_consentimiento")
         if not clave:
             st.caption("Para activar la IA configura OPENAI_API_KEY en los secretos de Streamlit.")
+    if clave and consentimiento:
+        st.success("IA de OpenAI habilitada para este chat.")
+    elif clave:
+        st.info("API configurada. Activa tu consentimiento en IA, privacidad y consentimiento para conversar con la IA.")
+    else:
+        st.warning("Chat con IA no conectado: falta OPENAI_API_KEY en los secretos de Streamlit. Disponible solo la ayuda local.")
     historial = st.session_state.setdefault("historial_asistente", [])
     for mensaje in historial[-12:]:
         with st.chat_message(mensaje["role"]):
