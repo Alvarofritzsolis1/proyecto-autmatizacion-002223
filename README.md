@@ -1,5 +1,20 @@
 # GALANT v17 — revisión documental con bandeja y evidencia
 
+## GALANT v18 — PREVIRED escaneado y girado
+
+Se integró el **lector OCR geométrico** en `previred_scan_adaptativo.py` y en `auditoria_laboral.py`. A diferencia del OCR general, analiza separadores horizontales y verticales y lee celdas individuales de RUT, días y bases mediante Tesseract. Se ejecuta solo para PDF sin texto digital suficiente y tiene prioridad frente al extractor rápido anterior.
+
+**Caso real utilizado para diagnóstico, sin subir el PDF a GitHub:** 10 páginas de PREVIRED de Construcciones y Hormigones Chávez y Cifuentes, septiembre de 2026. El extractor adaptativo probado localmente recuperó **4 trabajadores / 10 días cada uno**, con Salud y Mutual por un total de **962.778 CLP** cada una y base de Fondo AFP de **691.944 CLP**. La diferencia AFP de un trabajador (Fondo AFP 0 y base Seguro Cesantía 270.834 CLP) **debe permanecer en revisión**, no se convierte en renta AFP por similitud de montos. Los resultados están sujetos a verificación documental.
+
+La implementación también preserva páginas de respaldo, coteja lecturas contra RUT con dígito verificador válido, compara bases por trabajador y registra lecturas ambiguas. No infiere datos de documentos ilegibles; los formatos desconocidos continúan al lector antiguo.
+
+**Importante:** un lector OCR no garantiza el 100 % para todo PDF. El resultado no prueba que la empresa haya pagado realmente ni reemplaza verificaciones oficiales. No se han incluido RUT individuales ni PDFs privados en el repositorio.
+
+Documentación técnica de referencia: https://tesseract-ocr.github.io/tessdoc/ImproveQuality.html y https://pymupdf.readthedocs.io/en/latest/ocr/index.html.
+
+---
+
+
 La plataforma combina OCR de F30-1, Previred y Excel con una **bandeja priorizada** que muestra qué revisar primero. No utiliza chat ni API de pago.
 
 ### Qué cambió en la versión 17
