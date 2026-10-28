@@ -1,4 +1,19 @@
-# GALANT · Control documental de contratistas
+# GALANT v17 — revisión documental con bandeja y evidencia
+
+La plataforma combina OCR de F30-1, Previred y Excel con una **bandeja priorizada** que muestra qué revisar primero. No utiliza chat ni API de pago.
+
+### Qué cambió en la versión 17
+
+- Primera pestaña **Qué revisar**: ALTA, MEDIA y BAJA con archivo, página, hallazgo y acción.
+- Excel completo con certificados, cotizaciones, nómina cruzada, problemas OCR y registros de procesamiento.
+- F30-1 escaneados: se intenta reorientar la página cuando Tesseract no encuentra la estructura del documento.
+- Si falta la página de resumen del F30-1, se solicita el documento completo; **no se presume impago**.
+- No se repite un aviso de cotizaciones de otro mes por cada trabajador del F30-1.
+- La revisión se mantiene local, sin cargar PDFs a API de IA.
+
+Revisa [comparación con plataformas profesionales](BENCHMARK_PLATAFORMAS_GALANT_V17.md). Los hallazgos son documentales: no sustituyen la verificación oficial DT.
+
+---
 
 **GALANT** es una aplicación Streamlit para revisar cotizaciones previsionales (AFP, Salud, Mutual/ISL, Seguro Social) y certificados F30-1. Coteja empleadores, períodos y RUT por documento, revisa bases y presenta observaciones accionables.
 
