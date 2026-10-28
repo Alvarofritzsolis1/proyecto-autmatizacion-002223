@@ -895,6 +895,7 @@ def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
         # que más lo necesitan.
         import fitz
         with fitz.open(stream=contenido, filetype="pdf") as probe:
+            paginas_pdf = probe.page_count
             digital = any(
                 len(probe[i].get_text().strip()) > 120
                 for i in range(min(2, probe.page_count))
@@ -937,7 +938,23 @@ def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
         especializado = extraer_previred(contenido, nombre, ocr_pagina=_ocr_pdf_pagina)
         if especializado is not None:
             return especializado
-        return _leer_pdf_bytes(contenido, nombre)
+        try:
+            return _leer_pdf_bytes(contenido, nombre)
+        except ValueError as exc:
+            # Mensaje único de esta versión: si se muestra el error antiguo sin
+            # GALANT-OCR-182, el despliegue NO ejecuta el código actualizado.
+            if not digital or escaneo_visual:
+                raise ValueError(
+                    f"[GALANT-OCR-182] {nombre}: PDF escaneado de "
+                    f"{paginas_pdf} páginas (capa de texto: "
+                    f"{'sí' if digital else 'no'}). "
+                    "El lector geométrico, las retículas y el lector "
+                    "especializado no devolvieron una nómina verificable. "
+                    "Faltan datos suficientes para auditar; consulta la "
+                    "configuración de despliegue y revisa las páginas de "
+                    "detalle. No se asignaron montos ni días por suposición."
+                ) from exc
+            raise
     raise ValueError(f"{nombre}: formato {extension or '(sin extensión)'} no admitido.")
 
 
