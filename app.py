@@ -9,8 +9,10 @@ import streamlit as st
 from auditoria_laboral import COLUMNAS_SALIDA, ejecutar_pipeline, plantilla_topes_csv
 from cruce_documental_galant import conciliar_f301_previred
 from f301_lector import analizar_f301, es_f301
+from bandeja_revision import generar_bandeja, resumen_calidad
+from informe_galant import informe_consolidado
 
-VERSION = "16.0"
+VERSION = "17.0"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -132,11 +134,26 @@ if st.button(
         cruzados, resumen_cruce = conciliar_f301_previred(
             certificados, nomina, matriz
         )
+        bandeja = generar_bandeja(
+            certificados=certificados, incidencias=incidencias,
+            detalle=detalle, log=log, cruce_detalle=cruzados,
+            cruce_resumen=resumen_cruce, errores=errores, duplicados=duplicados,
+        )
+        calidad = resumen_calidad(certificados, matriz, bandeja)
+        try:
+            reporte_excel = informe_consolidado(
+                bandeja=bandeja, certificados=certificados, matriz=matriz,
+                detalle_cruce=cruzados, resumen_cruce=resumen_cruce,
+                log=log, incidencias=incidencias,
+            )
+        except Exception:
+            reporte_excel = None  # No perder la auditoría si el exportador falla.
     st.session_state["reporte_galant"] = {
         "firma": firma, "certificados": certificados,
         "nomina": nomina, "incidencias": incidencias,
         "matriz": matriz, "excel": excel, "detalle": detalle, "log": log,
         "cruce_detalle": cruzados, "cruce_resumen": resumen_cruce,
+        "bandeja": bandeja, "calidad": calidad, "reporte_excel": reporte_excel,
         "duplicados": duplicados, "errores": errores,
         "duracion": time.perf_counter()-inicio,
     }
@@ -152,9 +169,9 @@ elif reporte:
     estados = matriz["estado_auditoria"].value_counts() if "estado_auditoria" in matriz else {}
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("F30-1 leídos", len(certificados))
-    m2.metric("Trabajadores en cotizaciones", len(matriz))
+    m2.metric("Nóminas F30-1 completas", reporte["calidad"]["nominas_completas"])
     m3.metric("Bases sin observaciones", int(estados.get("CONFORME", 0)))
-    m4.metric("Filas para revisar", int(len(matriz) - estados.get("CONFORME", 0)))
+    m4.metric("Casos prioridad alta", reporte["calidad"]["pendientes_prioridad_alta"])
     st.caption(
         f"Tiempo: {reporte['duracion']:.1f} segundos. "
         "«Sin observaciones» significa solo cuadratura según reglas configuradas, no cumplimiento legal."
@@ -171,9 +188,50 @@ elif reporte:
     if not reporte["errores"] and not certificados and matriz.empty:
         st.warning("No se recuperaron registros. Revisa si los archivos contienen páginas legibles.")
 
-    tab_resumen, tab_f301, tab_previred = st.tabs(
-        ["Resumen y cruce", "Certificados F30-1", "Cotizaciones y detalle"]
+    tab_revision, tab_resumen, tab_f301, tab_previred = st.tabs(
+        ["Qué revisar", "Cruce F30-1 / Previred", "Certificados F30-1", "Cotizaciones"]
     )
+    with tab_revision:
+        st.markdown("**Bandeja de excepciones por prioridad**")
+        st.caption(
+            "GALANT muestra solo información que necesita revisión. "
+            "ALTA, MEDIA y BAJA son prioridades de trabajo, no calificaciones legales."
+        )
+        pendientes = reporte["bandeja"]
+        if pendientes.empty:
+            st.success(
+                "No se identificaron excepciones en los documentos disponibles. "
+                "Esto no certifica el pago ni la autenticidad de los certificados."
+            )
+        else:
+            prioridades = st.multiselect(
+                "Prioridad", ["ALTA", "MEDIA", "BAJA"],
+                default=["ALTA", "MEDIA"],
+                help="Selecciona también BAJA para ver archivos duplicados.",
+                key="prioridades_galant",
+            )
+            visible = pendientes.loc[pendientes["prioridad"].isin(prioridades)]
+            st.dataframe(
+                visible, hide_index=True, use_container_width=True,
+                column_config={
+                    "hallazgo": st.column_config.TextColumn("Qué se detectó", width="large"),
+                    "accion_recomendada": st.column_config.TextColumn("Qué hacer", width="large"),
+                },
+            )
+            st.caption(
+                f"{len(pendientes)} casos identificados. "
+                "El archivo y la página se muestran cuando el extractor pudo reconocerlos."
+            )
+        if reporte.get("reporte_excel"):
+            st.download_button(
+                "Descargar informe completo GALANT (.xlsx)",
+                data=reporte["reporte_excel"],
+                file_name="GALANT_Informe_Documental.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+            )
+        else:
+            st.warning("No se pudo generar el informe consolidado en esta ejecución.")
     with tab_resumen:
         if not resumen_cruce.empty:
             st.markdown("**Cruce F30-1 ↔ Previred por empresa, período y RUT**")

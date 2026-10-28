@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
       - name: Validar Python
-        run: python -m compileall -q app.py auditoria_laboral.py f301_lector.py f301_nomina_reforzada.py cruce_documental_galant.py previred_pdf.py previred_scan_fast.py aprendizaje_continuo.py
+        run: python -m compileall -q app.py auditoria_laboral.py f301_lector.py f301_nomina_reforzada.py bandeja_revision.py informe_galant.py cruce_documental_galant.py previred_pdf.py previred_scan_fast.py aprendizaje_continuo.py
       - name: Tests
         run: python -m pytest -q
       - name: Evaluar aprendizaje sin publicar cambios

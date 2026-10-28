@@ -40,23 +40,72 @@ def rut_valido(valor: str) -> str:
 rut_normalizado = rut_valido
 
 
+def _puntos_f301(texto: str) -> int:
+    """Señales textuales reales, sin inventar un porcentaje de confianza OCR."""
+    t = sin_acentos(texto).lower()
+    palabras = (
+        'certificado', 'cumplimiento', 'obligaciones laborales',
+        'previsionales', 'nombre trabajador', 'trabajadores declarados',
+        'detalle por periodo', 'cotizaciones previsionales',
+    )
+    return sum(bool(p in t) for p in palabras)
+
+
 def _pagina_texto(pagina, psm=3) -> tuple[str, str]:
+    """Extracción híbrida con orientación de respaldo para escaneos laterales.
+
+    No rota PDFs digitales ni reinterpreta importes; usa orientación solo cuando
+    Tesseract no identifica la estructura documental. Evita instalar OCR de pago.
+    """
     texto = pagina.get_text('text', sort=True)
     if len(texto.strip()) > 180:
         return texto, 'DIGITAL'
     import pytesseract
     from PIL import Image
-    pix = pagina.get_pixmap(matrix=fitz.Matrix(2.4, 2.4), alpha=False)
+
+    pix = pagina.get_pixmap(
+        matrix=fitz.Matrix(2.3, 2.3), colorspace=fitz.csRGB, alpha=False
+    )
     img = Image.frombytes('RGB', (pix.width, pix.height), pix.samples)
     texto = pytesseract.image_to_string(
-        img, lang='eng', config=f'--psm {psm}', timeout=20
+        img, lang='eng', config=f'--psm {psm}', timeout=18
     )
     if len(texto.strip()) < 100:
         alterno = pytesseract.image_to_string(
-            img, lang='eng', config='--psm 6', timeout=20
+            img, lang='eng', config='--psm 6', timeout=18
         )
-        if len(alterno.strip()) > len(texto.strip()):
+        if (_puntos_f301(alterno), len(alterno)) > (_puntos_f301(texto), len(texto)):
             texto = alterno
+    if _puntos_f301(texto) < 2:
+        # Buscar orientación solo en páginas con estructura OCR no recuperada.
+        # OSD puede fallar en páginas con muy pocas letras.
+        try:
+            datos = pytesseract.image_to_osd(
+                img, output_type=pytesseract.Output.DICT, timeout=7
+            )
+            rotacion = int(datos.get('rotate', 0))
+        except Exception:
+            rotacion = 0
+        # Una orientación OSD válida suele ahorrar 2 pasadas adicionales;
+        # si no existe, intentar ambos giros laterales y luego 180 grados.
+        candidatos = (
+            [rotacion] + [a for a in (90, 270, 180) if a != rotacion]
+            if rotacion in (90, 180, 270) else [90, 270, 180]
+        )
+        mejor = (_puntos_f301(texto), len(texto))
+        for angulo in candidatos:
+            try:
+                candidato = pytesseract.image_to_string(
+                    img.rotate(-angulo, expand=True),
+                    lang='eng', config='--psm 6', timeout=16
+                )
+            except Exception:
+                continue
+            puntuacion = (_puntos_f301(candidato), len(candidato))
+            if puntuacion > mejor:
+                texto, mejor = candidato, puntuacion
+            if mejor[0] >= 3:
+                break
     return texto, 'OCR'
 
 
