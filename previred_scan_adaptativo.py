@@ -255,8 +255,10 @@ def _extraer_paginas(pdf):
     if pdf.page_count>120:
         raise ValueError('PDF demasiado largo para OCR interactivo')
     for idx,pagina in enumerate(pdf):
-        if len(pagina.get_text().strip())>120:
-            return [],[]
+        # Un PDF escaneado puede traer una capa OCR previa encima de la imagen
+        # completa. Esa capa no implica que las tablas sean estructuradas, por lo
+        # que no se debe abandonar el lector geométrico solo porque get_text()
+        # devuelva caracteres.
         img=_pagina_horizontal(pagina)
         w,h=img.size
         texto=_lectura(img.crop((0,0,w,int(h*.24))),'--psm 6',timeout=5)
