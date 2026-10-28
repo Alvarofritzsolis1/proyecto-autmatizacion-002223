@@ -186,3 +186,8 @@ if reporte:
         )
     else:
         st.info("Cambiaste los archivos o las opciones después del último análisis. Ejecuta nuevamente la auditoría para actualizar el informe.")
+
+
+# Chat opcional: no altera el motor ni los resultados de la auditoria.
+from chat_asesor import mostrar_chat
+mostrar_chat(st.session_state.get('reporte_auditoria'))
