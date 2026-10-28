@@ -156,7 +156,11 @@ def _rut_ocr(s):
 
 
 def _numeros_ocr(s):
-    t=re.sub(r'[^0-9.]','',s or '')
+    # Cero y letra O no son intercambiables: un OCR ambiguo se revisa.
+    bruto=(s or '').strip()
+    if re.search(r'[^0-9.,\s|]',bruto):
+        return None
+    t=re.sub(r'[^0-9.]','',bruto)
     if not t or not re.fullmatch(r'\d{1,3}(?:\.\d{3})+|\d+',t):
         return None
     return int(t.replace('.',''))
