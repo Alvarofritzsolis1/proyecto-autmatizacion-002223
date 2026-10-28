@@ -372,210 +372,19 @@ def _contexto(documento: bytes, plantillas:list[Plantilla]) -> tuple[str,str,str
 
 
 def _advertencias_ocr_por_trabajador(invalidas, fuentes_rut):
-    """Asigna al RUT lecturas OCR de sus propias filas.
-
-    Si una fila perdió RUT o renta por completo, no se sabe a quién asignarla:
-    se conserva como problema del documento para evitar falsos conformes.
-    """
-    referencias = {
-        (pagina, fila + 1)
-        for movimientos in fuentes_rut.values()
-        for pagina, fila, _, _ in movimientos
-    }
-    resultado = []
-    for mensaje in invalidas:
-        m = re.match(r'^p\.(\d+), fila (\d+): (.*)
-    """Extractor opcional para PREVIRED escaneado, no sustituye lectura digital.
-
-    Devuelve None si el documento no coincide con el perfil de tablas; entonces
-    entra el procesador estándar. Nunca emite 'CONFORME' sin respaldo total.
-    """
-    perfiles=_extraer_plantillas(contenido)
-    tipos={p.tipo for p in perfiles}
-    if not perfiles or len(tipos)<2 or 'salud' not in tipos:
-        return None
-    nombres_empleador,rut_empleador,periodo,mutual=_contexto(contenido,perfiles)
-    datos:dict[str,dict[str,list[tuple[int,int,int|None,int|None]]]]=defaultdict(lambda:defaultdict(list))
-    nombres: dict[str,str] = {}
-    invalidas: list[str] = []
-    salud_por_posicion: list[tuple[str,int|None,int|None]] = []
-    # Primero Fonasa: su RUT y días sirven como control independiente de otras
-    # instituciones, sin imponer su base como la base de AFP o Mutual.
-    orden=sorted(perfiles,key=lambda p:0 if p.tipo=='salud' else 1)
-    for p in orden:
-        lote=_ocr_columna_digitos(p)
-        nfilas=len(p.filas_y)
-        # Una fuente con igual orden y número de filas puede utilizarse para
-        # reconocer un RUT ilegible, pero solo si tres RUT válidos anclan el orden.
-        puede_alinear=False
-        if p.tipo in ('mutual','seguro_social') and len(salud_por_posicion)==nfilas:
-            anclas=[(j,_rut(v.get('rut',''))) for j,v in enumerate(lote) if _rut(v.get('rut',''))]
-            correctas=sum(1 for j,r in anclas if r==salud_por_posicion[j][0])
-            puede_alinear=(correctas>=3 and correctas==len(anclas))
-        for j,v in enumerate(lote):
-            # La cabecera o el total no son trabajadores: evita OCR adicional.
-            if not v.get('rut') and not v.get('renta') and not v.get('dias'):
-                if p.tipo=='salud':
-                    salud_por_posicion.append(('',None,None))
-                continue
-            rut=_rut(v.get('rut',''))
-            if not rut:
-                rut=_rut(_ocr_celda(p,'rut',j))
-            if not rut and puede_alinear:
-                rut=salud_por_posicion[j][0]
-                if rut:
-                    invalidas.append(f'p.{p.numero_pagina}, fila {j+1}: RUT alineado con Salud; cotejar visualmente')
-            # En salud se puede corroborar por RUT; en las otras instituciones,
-            # el esperado sirve únicamente para resolver discrepancias entre
-            # montos *leídos realmente* en el propio recorte de esa fuente.
-            esperado=None
-            if p.tipo!='salud':
-                val_salud=datos.get(rut,{}).get('salud',[])
-                if val_salud:esperado=sum(row[2] for row in val_salud)
-            cifra_lote=_renta(v.get('renta',''))
-            # Una cifra coincidente en el OCR y en la fuente independiente
-            # NO necesita otra invocación por celda; ahorro clave en nóminas grandes.
-            if esperado is not None and cifra_lote==esperado:
-                candidatos=[cifra_lote]
-            else:
-                cifra_2x=_ocr_num_con_escala(p,'renta',j,2.0)
-                candidatos=[cifra_lote,cifra_2x]
-                if (cifra_lote is None or cifra_2x is None or cifra_lote!=cifra_2x) and (esperado is None or esperado not in candidatos):
-                    candidatos.append(_ocr_num_con_escala(p,'renta',j,3.0))
-            renta,contradiccion=_seleccionar_valor(candidatos,esperado)
-            if contradiccion:
-                invalidas.append(f'p.{p.numero_pagina}, fila {j+1}: lecturas alternativas de renta {sorted(set(n for n in candidatos if n is not None))}; cotejar')
-            dias=None
-            if p.tipo=='salud':
-                dias=_ocr_num_con_escala(p,'dias',j,2.0)
-                # Para 11 días, a veces el OCR reconoce únicamente '1'.
-                # Un segundo recorte independiente verifica los dos caracteres.
-                if dias is None or dias==1:
-                    alt=_ocr_num_con_escala(p,'dias',j,4.0)
-                    if alt is not None and 0<=alt<=31:
-                        dias=alt
-                if dias is None:
-                    dias=_renta(v.get('dias',''))
-                if dias is None or dias>31:
-                    invalidas.append(f'p.{p.numero_pagina}, fila {j+1}: días Salud no verificados')
-                    dias=None
-            elif p.tipo=='seguro_social':
-                dias=_ocr_num_con_escala(p,'dias',j,1.5)
-                # Las tablas muy pequeñas pueden confundir 6 con 5/8 y 11 con
-                # 41; cotejar contra salud si se reconoce alternativamente.
-                if dias is None or dias>31:
-                    dias=_renta(v.get('dias',''))
-                if dias is not None and dias>31:
-                    dias=None
-                ds=datos.get(rut,{}).get('salud',[])
-                dia_esperado=sum(x[3] for x in ds if x[3] is not None) if ds else None
-                if dia_esperado is not None and dias != dia_esperado:
-                    # Segundo intento, sin copiar días de Salud a Seguro Social.
-                    alternativas=[_ocr_num_con_escala(p,'dias',j,escala) for escala in (1.4,2.5,3.2)]
-                    if dia_esperado in alternativas:
-                        dias=dia_esperado  # leído en el SS por un segundo OCR
-                    else:
-                        # No copiar días de Salud a Seguro Social: se registra
-                        # discrepancia para revisión humana.
-                        invalidas.append(f'p.{p.numero_pagina}, fila {j+1}: días Seguro Social no concuerdan con Salud')
-            if p.tipo=='salud':
-                salud_por_posicion.append((rut,renta,dias))
-            if not rut:
-                if re.search(r'\d{5,}',v.get('rut','')):
-                    invalidas.append(f'p.{p.numero_pagina}, fila {j+1}: RUT no reconocido')
-                continue
-            if renta is None:
-                invalidas.append(f'p.{p.numero_pagina}, fila {j+1}: base imponible no reconocida')
-                continue
-            if dias is not None and not 0<=dias<=31:
-                dias=None
-            datos[rut][p.tipo].append((p.numero_pagina,j,renta,dias))
-            if p.tipo=='salud':
-                nombre=_nombre_salud(p,j)
-                if nombre:nombres[rut]=nombre
-    if not datos:
-        raise ValueError('OCR escaneado detectó las tablas, pero no extrajo RUT y rentas verificables.')
-    # Comprobar coherencia de todas las fuentes, incluidos registros omitidos.
-    fuentes={t for t in tipos if t in ('salud','afp','mutual','seguro_social')}
-    totales={t:sum(row[2] for por in datos.values() for row in por.get(t,[])) for t in fuentes}
-    tam_fuentes={t:len({rut for rut,por in datos.items() if por.get(t)}) for t in fuentes}
-    ruts_salud={rut for rut,fu in datos.items() if fu.get('salud')}
-    ruts_consolidado=set(datos)
-    if ruts_salud!=ruts_consolidado:
-        invalidas.append('No coinciden los RUT entre Salud y las demás instituciones')
-    # No propagar a todos los trabajadores una diferencia agregada de AFP o
-    # Seguro Social: algunos trabajadores pueden tener regímenes o movimientos
-    # distintos. Comparar por RUT y dejar hallazgos solo en filas afectadas.
-    # Totales generales solo sirven como diagnóstico, no como pago acreditado.
-    if not nombres_empleador or not rut_empleador or not periodo:
-        invalidas.append('Falta información verificada de empleador o período en cabecera OCR')
-    salida=[]
-    for rut,fuentes_rut in sorted(datos.items()):
-        obs=[]
-        for t in ('salud','afp','mutual'):
-            if not fuentes_rut.get(t):obs.append(f'Falta detalle {t}')
-        def base(tipo):
-            vals=fuentes_rut.get(tipo,[])
-            return sum(x[2] for x in vals) if vals else None
-        dia_s= sum(x[3] for x in fuentes_rut.get('salud',[]) if x[3] is not None) if fuentes_rut.get('salud') else None
-        dia_ss=sum(x[3] for x in fuentes_rut.get('seguro_social',[]) if x[3] is not None) if fuentes_rut.get('seguro_social') else None
-        if dia_s is not None and dia_ss is not None and dia_s!=dia_ss:
-            obs.append('Días Salud no coinciden con Seguro Social')
-        if any(not x[3] and x[3]!=0 for x in fuentes_rut.get('salud',[])):
-            obs.append('Días de Salud ilegibles')
-        rentas=[base('salud'),base('afp'),base('mutual')]
-        if len({x for x in rentas if x is not None})>1:
-            obs.append(
-                'Bases imponibles distintas entre AFP, Salud y Mutual para este RUT; '
-                'verificar régimen y documentos originales, no presumir impago'
-            )
-        # El Seguro Social tiene un ámbito que puede diferir del resto de las
-        # instituciones. Su ausencia no invalida toda la nómina.
-        if fuentes_rut.get('seguro_social'):
-            if base('salud') is not None and base('seguro_social') != base('salud'):
-                obs.append('Base Seguro Social distinta de Salud para este trabajador')
-        elif 'seguro_social' in fuentes:
-            obs.append('Trabajador sin fila de Seguro Social; verificar si corresponde cotizar')
-        invalidas_de_este_rut = _advertencias_ocr_por_trabajador(invalidas, fuentes_rut)
-        if invalidas_de_este_rut:
-            obs.append('Verificar OCR: '+'; '.join(invalidas_de_este_rut[:8]))
-        if not nombres.get(rut):
-            obs.append('Nombre no confirmado en anexo Salud')
-        paginas=sorted({r[0] for v in fuentes_rut.values() for r in v})
-        # Si tres instituciones coinciden en la base, el RUT tiene nombre y
-        # días válidos y no hay lecturas ambiguas, no crear una falsa alerta
-        # solo porque el documento es imagen. Sigue sin probar pago efectivo.
-        cotejo_ocr = bool(
-            not obs and all(fuentes_rut.get(t) for t in ('salud','afp','mutual'))
-            and all(x is not None and x > 0 for x in rentas)
-            and len(set(rentas)) == 1 and dia_s is not None and 0 < dia_s <= 31
-            and nombres.get(rut) and rut_empleador and periodo
-        )
-        if not cotejo_ocr:
-            obs.append('OCR sin conciliación completa: cotejar páginas originales')
-        salida.append({
-            'periodo_remuneracion':periodo,
-            'contratista_nombre':nombres_empleador,
-            'contratista_rut':rut_empleador,
-            'trabajador_nombre':nombres.get(rut,''),
-            'trabajador_rut':rut,
-            'dias_reales_pagados':dia_s if dia_s is not None else dia_ss,
-            'renta_imponible_salud':base('salud'),
-            'renta_imponible_afp':base('afp'),
-            'renta_imponible_mutual':base('mutual'),
-            'mutual_adherida':mutual,
-            '__hoja_origen':', '.join(f'p.{z}' for z in paginas),
-            '__ocr_estado': 'OCR_COTEJO_BASES_DIAS' if cotejo_ocr else 'OCR_REQUIERE_REVISION',
-            '__conflicto_pdf':'; '.join(obs),
-        })
-    return pd.DataFrame(salida)
-, mensaje)
-        if not m:
-            resultado.append(mensaje)
-        elif 'RUT no reconocido' in mensaje or 'base imponible no reconocida' in mensaje:
-            resultado.append(mensaje)
-        elif (int(m.group(1)), int(m.group(2))) in referencias:
-            resultado.append(mensaje)
+    """Aplicar advertencias OCR a filas reconocidas, sin perder avisos globales."""
+    referencias={(pagina,fila+1)
+                 for movimientos in fuentes_rut.values()
+                 for pagina,fila,_,_ in movimientos}
+    resultado=[]
+    for aviso in invalidas:
+        match=re.match(r'^p\.(\d+), fila (\d+): (.*)$',aviso)
+        if not match:
+            resultado.append(aviso)
+        elif 'RUT no reconocido' in aviso or 'base imponible no reconocida' in aviso:
+            resultado.append(aviso)
+        elif (int(match.group(1)),int(match.group(2))) in referencias:
+            resultado.append(aviso)
     return list(dict.fromkeys(resultado))
 
 
@@ -698,10 +507,7 @@ def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFram
     ruts_consolidado=set(datos)
     if ruts_salud!=ruts_consolidado:
         invalidas.append('No coinciden los RUT entre Salud y las demás instituciones')
-    # No propagar a todos los trabajadores una diferencia agregada de AFP o
-    # Seguro Social: algunos trabajadores pueden tener regímenes o movimientos
-    # distintos. Comparar por RUT y dejar hallazgos solo en filas afectadas.
-    # Totales generales solo sirven como diagnóstico, no como pago acreditado.
+    # No imputar una diferencia global AFP/Seguro Social a todos: cotejar por RUT.
     if not nombres_empleador or not rut_empleador or not periodo:
         invalidas.append('Falta información verificada de empleador o período en cabecera OCR')
     salida=[]
@@ -720,29 +526,22 @@ def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFram
             obs.append('Días de Salud ilegibles')
         rentas=[base('salud'),base('afp'),base('mutual')]
         if len({x for x in rentas if x is not None})>1:
-            obs.append(
-                'Bases imponibles distintas entre AFP, Salud y Mutual para este RUT; '
-                'verificar régimen y documentos originales, no presumir impago'
-            )
-        # El Seguro Social tiene un ámbito que puede diferir del resto de las
-        # instituciones. Su ausencia no invalida toda la nómina.
+            obs.append('Bases AFP, Salud y Mutual distintas en este RUT; revisar régimen y documentos')
         if fuentes_rut.get('seguro_social'):
-            if base('salud') is not None and base('seguro_social') != base('salud'):
+            if base('salud') is not None and base('seguro_social')!=base('salud'):
                 obs.append('Base Seguro Social distinta de Salud para este trabajador')
         elif 'seguro_social' in fuentes:
-            obs.append('Trabajador sin fila de Seguro Social; verificar si corresponde cotizar')
-        if invalidas:
-            obs.append('Verificar OCR: '+'; '.join(dict.fromkeys(invalidas[:8])))
+            obs.append('Trabajador no hallado en Seguro Social: verificar si corresponde cotizar')
+        invalidas_de_este_rut=_advertencias_ocr_por_trabajador(invalidas,fuentes_rut)
+        if invalidas_de_este_rut:
+            obs.append('Verificar OCR: '+'; '.join(invalidas_de_este_rut[:8]))
         if not nombres.get(rut):
             obs.append('Nombre no confirmado en anexo Salud')
         paginas=sorted({r[0] for v in fuentes_rut.values() for r in v})
-        # Si tres instituciones coinciden en la base, el RUT tiene nombre y
-        # días válidos y no hay lecturas ambiguas, no crear una falsa alerta
-        # solo porque el documento es imagen. Sigue sin probar pago efectivo.
-        cotejo_ocr = bool(
+        cotejo_ocr=bool(
             not obs and all(fuentes_rut.get(t) for t in ('salud','afp','mutual'))
-            and all(x is not None and x > 0 for x in rentas)
-            and len(set(rentas)) == 1 and dia_s is not None and 0 < dia_s <= 31
+            and all(x is not None and x>0 for x in rentas)
+            and len(set(rentas))==1 and dia_s is not None and 0<dia_s<=31
             and nombres.get(rut) and rut_empleador and periodo
         )
         if not cotejo_ocr:
@@ -759,7 +558,7 @@ def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFram
             'renta_imponible_mutual':base('mutual'),
             'mutual_adherida':mutual,
             '__hoja_origen':', '.join(f'p.{z}' for z in paginas),
-            '__ocr_estado': 'OCR_COTEJO_BASES_DIAS' if cotejo_ocr else 'OCR_REQUIERE_REVISION',
+            '__ocr_estado':'OCR_COTEJO_BASES_DIAS' if cotejo_ocr else 'OCR_REQUIERE_REVISION',
             '__conflicto_pdf':'; '.join(obs),
         })
     return pd.DataFrame(salida)
