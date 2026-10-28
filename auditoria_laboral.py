@@ -889,27 +889,50 @@ def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
     if extension == ".csv":
         return _leer_csv_bytes(contenido, nombre)
     if extension == ".pdf":
-        # Una lectura digital ya contiene caracteres indexables. No pasarla a
-        # Tesseract: conserva velocidad, precisión y trazabilidad del archivo.
-        # En escaneos, el lector rápido identifica líneas de tablas y aplica OCR
-        # solo a celdas útiles (RUT, días, renta, nombre), no a las 12 portadas.
+        # Una capa de texto no siempre significa PDF digital: muchos escaneos
+        # traen OCR invisible encima de una imagen de página completa. Detectar
+        # ambos casos evita saltarse el lector geométrico justo en los documentos
+        # que más lo necesitan.
         import fitz
         with fitz.open(stream=contenido, filetype="pdf") as probe:
-            digital = any(len(probe[i].get_text().strip()) > 120 for i in range(min(2,probe.page_count)))
-        if not digital:
+            digital = any(
+                len(probe[i].get_text().strip()) > 120
+                for i in range(min(2, probe.page_count))
+            )
+            escaneo_visual = False
+            for i in range(min(3, probe.page_count)):
+                pagina = probe[i]
+                area_pagina = max(float(pagina.rect.width * pagina.rect.height), 1.0)
+                for imagen in pagina.get_images(full=True):
+                    try:
+                        rects = pagina.get_image_rects(imagen[0])
+                    except Exception:
+                        rects = []
+                    if any(
+                        (float(r.width * r.height) / area_pagina) >= 0.60
+                        for r in rects
+                    ):
+                        escaneo_visual = True
+                        break
+                if escaneo_visual:
+                    break
+
+        if not digital or escaneo_visual:
             # 1) Estructura geométrica adaptativa: corrige páginas A4 con
-            #    tablas internamente giradas y lee solo celdas verificables.
-            #    Restituye el lector probado en escaneos AFP/Salud/Mutual
-            #    que el OCR de texto y las retículas rígidas descartaban.
+            #    tablas internamente giradas y también escaneos con capa OCR.
             from previred_scan_adaptativo import extraer_previred_scan_adaptativo
             adaptativo = extraer_previred_scan_adaptativo(contenido, nombre)
-            if adaptativo is not None:
+            if adaptativo is not None and not adaptativo.empty:
                 return adaptativo
+
             # 2) Retículas históricas: conservar la compatibilidad anterior.
+            #    En PDFs con capa OCR puede devolver None; en ese caso siguen
+            #    disponibles el lector especializado y el genérico.
             from previred_scan_fast import extraer_previred_escaneado_rapido
             escaneado = extraer_previred_escaneado_rapido(contenido, nombre)
-            if escaneado is not None:
+            if escaneado is not None and not escaneado.empty:
                 return escaneado
+
         from previred_pdf import extraer_previred
         especializado = extraer_previred(contenido, nombre, ocr_pagina=_ocr_pdf_pagina)
         if especializado is not None:
