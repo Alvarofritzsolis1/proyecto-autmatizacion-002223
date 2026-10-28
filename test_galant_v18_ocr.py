@@ -136,3 +136,90 @@ def test_pagina_vertical_se_gira_para_leer_anexos_horizontales():
             })()
     img = _pagina_horizontal(Pagina())
     assert img.width == 800 and img.height == 600
+
+
+def test_documento_con_imagen_y_capa_ocr_prioriza_lector_geometrico():
+    """Un texto OCR invisible no debe convertir un escaneo en PDF digital."""
+    doc = fitz.open()
+    pg = doc.new_page(width=595, height=842)
+    imagen = Image.new("RGB", (720, 960), "white")
+    buffer = io.BytesIO()
+    imagen.save(buffer, format="PNG")
+    pg.insert_image(pg.rect, stream=buffer.getvalue())
+    pg.insert_textbox(
+        fitz.Rect(25, 25, 560, 200),
+        ("Texto OCR del comprobante de cotizaciones previsionales.\n" * 8),
+        fontsize=9,
+    )
+    contenido = doc.tobytes()
+    doc.close()
+    resultado = pd.DataFrame([{
+        "trabajador_rut": "100000008", "periodo_remuneracion": "2026-09"
+    }])
+    with patch(
+        "previred_scan_adaptativo.extraer_previred_scan_adaptativo",
+        return_value=resultado,
+    ) as adaptativo, patch(
+        "previred_scan_fast.extraer_previred_escaneado_rapido",
+        side_effect=AssertionError("No se debe invocar el lector rígido"),
+    ):
+        obtenido = leer_archivo(contenido, "escaneo_con_ocr.pdf")
+    assert adaptativo.call_count == 1
+    assert obtenido.equals(resultado)
+
+
+def test_permite_nomina_parcial_sin_aprobar_cotizaciones():
+    """Una fuente legible es mejor que descartar trabajadores verificados."""
+    imagen = Image.new("L", (1400, 800), 255)
+    plantilla = Anexo("salud", 10, imagen, [(220, 240)] * 4,
+                      list(range(20)), "2026-09", "")
+    ruts = ["100000008", "111111111", "222222222", "123456785"]
+    def observacion(_anexo, index):
+        return {
+            "tipo": "salud", "pagina": 10, "folio": "",
+            "ruts": [ruts[index]],
+            "bases": [230648, 230648],
+            "dias": [10, 10], "cesantia": [],
+            "nombre": "TRABAJADOR SINTETICO",
+        }
+    with patch(
+        "previred_scan_adaptativo._extraer_paginas",
+        return_value=([plantilla], []),
+    ), patch(
+        "previred_scan_adaptativo._observaciones", side_effect=observacion
+    ), patch(
+        "previred_scan_adaptativo._lectura",
+        return_value="NOMBRE EMPRESA DE PRUEBA RUT 76.543.210-3",
+    ):
+        df = extraer_previred_scan_adaptativo(
+            _pdf_en_memoria(), "archivo_sintetico.pdf"
+        )
+    assert df is not None and len(df) == 4
+    assert df["renta_imponible_afp"].isna().all()
+    assert df["renta_imponible_mutual"].isna().all()
+    assert df["mutual_adherida"].eq("NO IDENTIFICADA").all()
+    assert df["__ocr_estado"].eq("OCR_REQUIERE_REVISION").all()
+
+
+def test_error_final_distingue_servidor_desactualizado():
+    """Fallo OCR debe llevar marca de despliegue, sin falsos valores."""
+    from unittest.mock import patch
+    from auditoria_laboral import _leer_pdf_bytes
+    with patch(
+        "previred_scan_adaptativo.extraer_previred_scan_adaptativo",
+        return_value=None,
+    ), patch(
+        "previred_scan_fast.extraer_previred_escaneado_rapido",
+        return_value=None,
+    ), patch(
+        "previred_pdf.extraer_previred", return_value=None,
+    ), patch(
+        "auditoria_laboral._leer_pdf_bytes",
+        side_effect=ValueError("sin tabla"),
+    ):
+        try:
+            leer_archivo(_pdf_en_memoria(), "planilla_sintetica.pdf")
+        except ValueError as exc:
+            assert "GALANT-OCR-182" in str(exc)
+        else:
+            raise AssertionError("Debe informar diagnostico, no emitir datos")
