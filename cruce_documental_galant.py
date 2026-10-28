@@ -8,7 +8,7 @@ from collections import defaultdict
 import pandas as pd
 from auditoria_laboral import clave_rut, normalizar_periodo
 
-COLUMNAS = ["certificado", "contratista", "periodo", "rut_trabajador",
+COLUMNAS = ["archivo_f301", "certificado", "contratista", "periodo", "rut_trabajador",
             "trabajador", "resultado", "accion", "estado_previred", "pagina_f301"]
 
 def _str(value):
@@ -72,7 +72,7 @@ def conciliar_f301_previred(certificados, nomina, matriz):
                     "RUT, empleador y mes coinciden. No certifica pago ni autenticidad DT.")
             estados.append(estado)
             detalle.append({
-                "certificado": folio, "contratista": _str(cert.get("contratista")),
+                "archivo_f301": archivo, "certificado": folio, "contratista": _str(cert.get("contratista")),
                 "periodo": periodo, "rut_trabajador": rut,
                 "trabajador": _str(trabajador.get("trabajador_nombre")),
                 "resultado": estado, "accion": accion,
