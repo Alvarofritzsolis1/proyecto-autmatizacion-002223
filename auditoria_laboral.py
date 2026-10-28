@@ -956,6 +956,10 @@ def limpiar_y_transformar(df_crudo: pd.DataFrame, nombre_archivo: str) -> pd.Dat
     df["__archivo_origen"] = nombre_archivo
     if "__conflicto_pdf" in df_crudo.columns:
         df["__conflicto_pdf"] = df_crudo["__conflicto_pdf"].reindex(df.index).fillna("")
+    if "__ocr_evidencia" in df_crudo.columns:
+        df["__ocr_estado"] = "OCR_ESTRUCTURAL_COTEJADO"
+        df["__ocr_evidencia"] = df_crudo["__ocr_evidencia"].reindex(df.index).fillna("")
+        # Esta etiqueta NO afirma que la imagen garantice lectura perfecta.
     if "__hoja_origen" not in df.columns:
         df["__hoja_origen"] = ""
 
