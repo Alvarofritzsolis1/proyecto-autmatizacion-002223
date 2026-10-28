@@ -296,10 +296,14 @@ def extraer_previred_scan_adaptativo(contenido: bytes,nombre: str):
     with fitz.open(stream=contenido,filetype='pdf') as pdf:
         anexos,problemas=_extraer_paginas(pdf)
     tipos={a.tipo for a in anexos}
+    # Una página de otra institución puede fallar sin invalidar el resto.
+    # Las cifras faltantes se conservarán como desconocidas, no como cero.
+    if not anexos:
+        return None
     if not {'salud','mutual'}.issubset(tipos) or not (
         {'afp','seguro_social'} & tipos
     ):
-        return None
+        problemas.append('Cobertura institucional incompleta: revisión obligatoria')
     observaciones=[]
     for a in anexos:
         for i in range(len(a.filas)):
@@ -309,8 +313,10 @@ def extraer_previred_scan_adaptativo(contenido: bytes,nombre: str):
     anclas={
         r for obs in observaciones for r in obs['ruts'] if _rut_ok(r)
     }
-    if len(anclas)<2:
+    if not anclas:
         return None
+    if len(anclas)<2:
+        problemas.append('Solo un RUT validado: revisar contra el documento original')
     agrupado=defaultdict(lambda:defaultdict(list))
     nombres={}
     incidencias=defaultdict(list)
@@ -351,10 +357,10 @@ def extraer_previred_scan_adaptativo(contenido: bytes,nombre: str):
     periodo=next(iter(periodos)) if len(periodos)==1 else ''
     if len(periodos)>1:
         problemas.append('Períodos distintos entre instituciones')
-    salud=next(a for a in anexos if a.tipo=='salud')
-    w,h=salud.img.size
+    encabezado=next((a for a in anexos if a.tipo=='salud'),anexos[0])
+    w,h=encabezado.img.size
     cab=_lectura(
-        salud.img.crop(
+        encabezado.img.crop(
             (int(w*.10),int(h*.15),int(w*.53),int(h*.25))
         ).resize((int(w*.86),int(h*.20))),'--psm 6'
     )
@@ -392,6 +398,8 @@ def extraer_previred_scan_adaptativo(contenido: bytes,nombre: str):
         ds,dss=dias('salud'),dias('seguro_social')
         d=ds if ds is not None else dss
         notas=list(dict.fromkeys(incidencias[rut]))
+        if problemas:
+            notas.append('Revisión cobertura OCR: ' + '; '.join(problemas[:3]))
         if not periodo:
             notas.append('Período no confirmado en el PDF')
         if not rut_empresa:
@@ -427,7 +435,7 @@ def extraer_previred_scan_adaptativo(contenido: bytes,nombre: str):
             trabajador_nombre=nombres.get(rut,'NOMBRE EN REVISIÓN OCR'),
             trabajador_rut=rut,dias_reales_pagados=d,
             renta_imponible_salud=sal,renta_imponible_afp=afp,
-            renta_imponible_mutual=mut,mutual_adherida='ACHS',
+            renta_imponible_mutual=mut,mutual_adherida='ACHS' if 'mutual' in tipos else 'NO IDENTIFICADA',
             __hoja_origen=', '.join('p.'+str(p) for p in paginas),
             __conflicto_pdf='; '.join(notas),
             __cobertura_seguro_social=(
