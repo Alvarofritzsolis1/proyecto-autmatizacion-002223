@@ -12,7 +12,7 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 
-VERSION = "18.2"
+VERSION = "18.3"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -23,25 +23,12 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.title("GALANT")
-st.caption(f"v{VERSION} · Control documental de contratistas · F30-1, Previred y cotizaciones previsionales")
-st.write("Sube los documentos, presiona **Analizar** y revisa únicamente las diferencias detectadas.")
+st.caption("Control documental de contratistas")
+st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
-with st.expander("Alcance y privacidad del análisis", expanded=False):
-    st.write(
-        "GALANT compara información extraída de F30-1, AFP, Salud, Mutual/ISL "
-        "y Seguro Social. Un RUT coincidente no acredita que las cotizaciones estén pagadas. "
-        "Los certificados F30-1 no se autentican automáticamente ante la DT. "
-        "Los documentos se procesan en memoria sin subirlos al repositorio de GitHub."
-    )
-    st.warning(
-        "Los documentos pueden contener datos personales y remuneraciones. "
-        "Restringe el acceso a Streamlit antes de analizar información laboral real. "
-        "No subas certificados ni nóminas al GitHub público."
-    )
-
-st.subheader("1. Subir documentación")
+st.subheader("Subir archivos")
 archivos_subidos = st.file_uploader(
-    "F30-1, comprobantes de cotizaciones o Excel/CSV",
+    "PDF, Excel o CSV de F30-1 y cotizaciones",
     type=["pdf", "xlsx", "xls", "csv"],
     accept_multiple_files=True,
     max_upload_size=25,
@@ -52,7 +39,7 @@ limite_excedido = len(archivos) > MAX_ARCHIVOS or sum(a.size for a in archivos) 
 if limite_excedido:
     st.error("Se excedió el máximo de 20 archivos o 60 MB. Divide la carga.")
 
-with st.expander("Opciones avanzadas (normalmente no es necesario cambiarlas)", expanded=False):
+with st.expander("Configuración opcional", expanded=False):
     a, b = st.columns(2)
     with a:
         tolerancia = st.number_input(
@@ -160,201 +147,134 @@ if st.button(
 
 reporte = st.session_state.get("reporte_galant")
 if reporte and (not archivos or reporte["firma"] != _firma_actual()):
-    st.info("Cambiaste los documentos o las opciones. Presiona «Analizar documentos» para actualizar.")
+    st.info("Cambiaste los archivos. Presiona «Analizar documentos» para actualizar.")
 elif reporte:
-    st.subheader("2. Resultado de la revisión")
+    st.subheader("Resultado")
     matriz = reporte["matriz"]
     certificados = reporte["certificados"]
-    resumen_cruce = reporte["cruce_resumen"]
-    estados = matriz["estado_auditoria"].value_counts() if "estado_auditoria" in matriz else {}
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("F30-1 leídos", len(certificados))
-    m2.metric("Nóminas F30-1 completas", reporte["calidad"]["nominas_completas"])
-    m3.metric("Bases sin observaciones", int(estados.get("CONFORME", 0)))
-    m4.metric("Casos prioridad alta", reporte["calidad"]["pendientes_prioridad_alta"])
-    st.caption(
-        f"Tiempo: {reporte['duracion']:.1f} segundos. "
-        "«Sin observaciones» significa solo cuadratura según reglas configuradas, no cumplimiento legal."
-    )
+    pendientes = reporte["bandeja"]
 
-    if reporte["duplicados"]:
-        st.info(
-            f"Se omitieron {len(reporte['duplicados'])} archivos idénticos "
-            "para evitar procesarlos dos veces."
+    # Un RUT se cuenta una sola vez aunque figure en F30-1 y cotizaciones.
+    ruts = set()
+    if "trabajador_rut" in matriz.columns:
+        ruts.update(str(x).strip() for x in matriz["trabajador_rut"].dropna())
+    for trabajador in reporte["nomina"]:
+        rut = str(trabajador.get("trabajador_rut") or "").strip()
+        if rut:
+            ruts.add(rut)
+    ruts = {rut for rut in ruts if rut.lower() not in {"", "nan", "none"}}
+    archivos_leidos = len(certificados)
+    if reporte["log"] is not None and not reporte["log"].empty:
+        archivos_leidos += int(
+            reporte["log"]["resultado"].eq("PROCESADO").sum()
         )
-    for error in reporte["errores"]:
-        st.error("Un grupo de archivos no se pudo procesar: " + error)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Archivos leídos", archivos_leidos)
+    m2.metric("Trabajadores identificados", len(ruts))
+    m3.metric("Observaciones", len(pendientes))
+
     if reporte["errores"]:
-        st.caption(
-            f"Diagnóstico de versión: GALANT v{VERSION}. Si el error anterior "
-            "no contiene el código GALANT-OCR-182, verifica que Streamlit "
-            "esté desplegado desde este repositorio, rama main y app.py."
+        st.error("Uno o más archivos no pudieron leerse.")
+        with st.expander("Ver el motivo del error"):
+            for error in reporte["errores"]:
+                st.write(error)
+    if reporte["duplicados"]:
+        st.info("Se omitieron archivos repetidos para evitar contar dos veces.")
+
+    st.markdown("**Qué revisar**")
+    if pendientes.empty:
+        if reporte["errores"] or archivos_leidos == 0:
+            st.warning("No hay resultados suficientes. Revisa los archivos que no se pudieron leer.")
+        else:
+            st.success("No se detectaron diferencias en los documentos leídos.")
+    else:
+        columnas = {
+            "archivo": "Archivo",
+            "rut_trabajador": "RUT trabajador",
+            "hallazgo": "Qué revisar",
+            "accion_recomendada": "Qué hacer",
+        }
+        tabla = pendientes.reindex(columns=list(columnas)).rename(columns=columnas)
+        st.dataframe(
+            tabla, hide_index=True, use_container_width=True,
+            column_config={
+                "Qué revisar": st.column_config.TextColumn("Qué revisar", width="large"),
+                "Qué hacer": st.column_config.TextColumn("Qué hacer", width="large"),
+            },
         )
 
-    if not certificados and not matriz.empty:
-        st.caption(
-            "No se cargó un F30-1 en esta revisión: «F30-1 leídos: 0» "
-            "es normal cuando se analizan solamente cotizaciones Previred."
+    if reporte.get("reporte_excel"):
+        st.download_button(
+            "Descargar informe Excel",
+            data=reporte["reporte_excel"],
+            file_name="GALANT_Informe_Documental.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
         )
-    if not reporte["errores"] and not certificados and matriz.empty:
-        st.warning("No se recuperaron registros. Revisa si los archivos contienen páginas legibles.")
 
-    tab_revision, tab_resumen, tab_f301, tab_previred = st.tabs(
-        ["Qué revisar", "Cruce F30-1 / Previred", "Certificados F30-1", "Cotizaciones"]
-    )
-    with tab_revision:
-        st.markdown("**Bandeja de excepciones por prioridad**")
-        st.caption(
-            "GALANT muestra solo información que necesita revisión. "
-            "ALTA, MEDIA y BAJA son prioridades de trabajo, no calificaciones legales."
-        )
-        pendientes = reporte["bandeja"]
-        if pendientes.empty:
-            st.success(
-                "No se identificaron excepciones en los documentos disponibles. "
-                "Esto no certifica el pago ni la autenticidad de los certificados."
-            )
-        else:
-            prioridades = st.multiselect(
-                "Prioridad", ["ALTA", "MEDIA", "BAJA"],
-                default=["ALTA", "MEDIA"],
-                help="Selecciona también BAJA para ver archivos duplicados.",
-                key="prioridades_galant",
-            )
-            visible = pendientes.loc[pendientes["prioridad"].isin(prioridades)]
+    with st.expander("Ver documentos y trabajadores"):
+        if not matriz.empty:
+            st.markdown("**Cotizaciones**")
+            columnas_cot = {
+                "trabajador_nombre": "Trabajador",
+                "trabajador_rut": "RUT",
+                "periodo_remuneracion": "Período",
+                "dias_reales_pagados": "Días",
+                "renta_imponible_afp": "Base AFP",
+                "renta_imponible_salud": "Base salud",
+                "estado_auditoria": "Resultado",
+            }
             st.dataframe(
-                visible, hide_index=True, use_container_width=True,
-                column_config={
-                    "hallazgo": st.column_config.TextColumn("Qué se detectó", width="large"),
-                    "accion_recomendada": st.column_config.TextColumn("Qué hacer", width="large"),
-                },
-            )
-            st.caption(
-                f"{len(pendientes)} casos identificados. "
-                "El archivo y la página se muestran cuando el extractor pudo reconocerlos."
-            )
-        if reporte.get("reporte_excel"):
-            st.download_button(
-                "Descargar informe completo GALANT (.xlsx)",
-                data=reporte["reporte_excel"],
-                file_name="GALANT_Informe_Documental.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-            )
-        else:
-            st.warning("No se pudo generar el informe consolidado en esta ejecución.")
-    with tab_resumen:
-        if not resumen_cruce.empty:
-            st.markdown("**Cruce F30-1 ↔ Previred por empresa, período y RUT**")
-            st.dataframe(
-                resumen_cruce[[
-                    "contratista", "periodo", "trabajadores_declarados",
-                    "trabajadores_reconocidos", "rut_coincidentes",
-                    "rut_pendientes", "resultado", "accion"
-                ]],
+                matriz.reindex(columns=list(columnas_cot)).rename(
+                    columns=columnas_cot
+                ),
                 hide_index=True, use_container_width=True,
             )
-            st.caption(
-                "Previred puede incluir otras obras de la misma empresa: "
-                "no se marca como incumplimiento tener trabajadores adicionales allí. "
-                "El pago y la autenticidad de la DT se validan por separado."
-            )
-            st.download_button(
-                "Descargar detalle del cruce (CSV)",
-                data=reporte["cruce_detalle"].to_csv(index=False).encode("utf-8-sig"),
-                file_name="GALANT_Cruce_F301_Previred.csv",
-                mime="text/csv"
-            )
-        elif certificados:
-            st.info("Los F30-1 se identificaron, pero falta un comprobante comparable o una nómina recuperable.")
-        else:
-            st.info("Carga al menos un F30-1 para cotejar su nómina con Previred.")
-        pendientes_f301 = [
-            c for c in certificados
-            if c.get("observaciones")
-            or c.get("cotizaciones") != "SI_DECLARADO_EN_PDF"
-        ]
-        if pendientes_f301:
-            st.warning(
-                f"{len(pendientes_f301)} certificado(s) requieren revisión "
-                "de integridad, resumen o extracción."
-            )
-        if not reporte["cruce_detalle"].empty:
-            with st.expander("Trabajadores cotejados y acción sugerida"):
-                filtro = st.checkbox(
-                    "Mostrar solo RUT con diferencias o pendientes",
-                    value=True, key="filtrar_cruce_galant"
-                )
-                tabla = reporte["cruce_detalle"]
-                if filtro:
-                    tabla = tabla.loc[tabla["resultado"].ne("RUT_COINCIDE")]
-                st.dataframe(tabla, use_container_width=True, hide_index=True)
-
-    with tab_f301:
-        if not certificados:
-            st.info("No se cargaron certificados F30-1.")
-        for cert in certificados:
-            with st.container(border=True):
-                st.markdown(
-                    f"**{cert.get('contratista') or 'Empleador no identificado'}** "
-                    f"· período **{cert.get('periodo') or 'no identificado'}**"
-                )
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Declarados", cert.get("trabajadores_declarados")
-                          if cert.get("trabajadores_declarados") is not None else "?")
-                c2.metric("RUT recuperados", cert.get("trabajadores_identificados", 0))
-                c3.metric("Páginas", cert.get("paginas", ""))
-                if cert.get("cotizaciones") == "SI_DECLARADO_EN_PDF":
-                    st.info("El PDF declara cotizaciones pagadas; la DT aún no se ha verificado.")
-                elif cert.get("cotizaciones") == "SIN_RESUMEN_NO_SE_PUEDE_CONFIRMAR":
-                    st.warning(
-                        "Falta página de resumen. El estado de pago no es verificable "
-                        "con este archivo (no significa impago)."
-                    )
-                else:
-                    st.warning("Estado de pago no confirmado con este certificado.")
-                if cert.get("observaciones"):
-                    st.caption("Revisión necesaria: " + cert["observaciones"])
-                st.caption(
-                    f"Folio: {cert.get('folio', '')} · "
-                    "Autenticidad pendiente de verificación en DT."
-                )
-        if reporte["nomina"]:
-            with st.expander("Nómina detallada extraída del F30-1"):
-                st.dataframe(pd.DataFrame(reporte["nomina"]),
-                             use_container_width=True, hide_index=True)
-        st.link_button("Abrir verificador oficial DT", "https://verificador.dirtrab.cl/")
-
-    with tab_previred:
-        if matriz.empty:
-            st.info("No hay cotizaciones Previred procesadas en esta carga.")
-        else:
-            revisar = matriz.loc[matriz["estado_auditoria"].ne("CONFORME")]
-            solo = st.checkbox("Ver primero los registros que necesitan revisión", value=True)
+        if certificados:
+            st.markdown("**Certificados F30-1**")
+            filas_f301 = []
+            for cert in certificados:
+                declarados = cert.get("trabajadores_declarados")
+                filas_f301.append({
+                    "Empresa": cert.get("contratista") or "Sin identificar",
+                    "Período": cert.get("periodo") or "Sin identificar",
+                    "Trabajadores": cert.get("trabajadores_identificados", 0),
+                    "Declarados": declarados if declarados is not None else "Sin identificar",
+                    "Estado": (
+                        "Pago declarado, no verificado"
+                        if cert.get("cotizaciones") == "SI_DECLARADO_EN_PDF"
+                        else "Requiere revisión"
+                    ),
+                })
             st.dataframe(
-                (revisar if solo else matriz).reindex(columns=COLUMNAS_SALIDA),
-                use_container_width=True, hide_index=True
+                pd.DataFrame(filas_f301), hide_index=True, use_container_width=True
             )
-            if revisar.empty:
-                st.success(
-                    "Las bases documentales comparadas no muestran diferencias "
-                    "según los controles configurados. No equivale a pago acreditado."
-                )
-            if reporte.get("excel") is not None:
-                st.download_button(
-                    "Descargar auditoría Excel",
-                    data=reporte["excel"],
-                    file_name="GALANT_Auditoria_Documental.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary",
-                )
-        if reporte["detalle"] is not None and not reporte["detalle"].empty:
-            with st.expander("Causas y páginas de revisión de cotizaciones"):
-                st.dataframe(reporte["detalle"], hide_index=True, use_container_width=True)
-        if reporte["log"] is not None and not reporte["log"].empty:
-            with st.expander("Procesamiento y errores por archivo"):
-                st.dataframe(reporte["log"], hide_index=True, use_container_width=True)
-        if reporte["incidencias"]:
-            with st.expander("Lecturas F30-1 que necesitan revisión"):
-                st.dataframe(pd.DataFrame(reporte["incidencias"]),
-                             hide_index=True, use_container_width=True)
+            st.link_button(
+                "Consultar certificado en la DT",
+                "https://verificador.dirtrab.cl/",
+            )
+        resumen_cruce = reporte["cruce_resumen"]
+        if resumen_cruce is not None and not resumen_cruce.empty:
+            st.markdown("**Comparación F30-1 y cotizaciones**")
+            columnas_cruce = {
+                "contratista": "Empresa",
+                "periodo": "Período",
+                "trabajadores_declarados": "Declarados",
+                "rut_coincidentes": "Coinciden",
+                "rut_pendientes": "Pendientes",
+                "resultado": "Resultado",
+            }
+            st.dataframe(
+                resumen_cruce.reindex(columns=list(columnas_cruce)).rename(
+                    columns=columnas_cruce
+                ),
+                hide_index=True, use_container_width=True,
+            )
+        if matriz.empty and not certificados:
+            st.info("No se recuperaron datos de trabajadores.")
+
+    st.caption(
+        f"GALANT v{VERSION} · La revisión compara documentos, "
+        "pero no certifica pagos ni autenticidad."
+    )
