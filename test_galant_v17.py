@@ -160,7 +160,8 @@ def test_reintento_de_giro_con_ocr_solo_si_no_lee_estructura(monkeypatch):
         width=60, height=80, samples=imagen.tobytes()
     )
     respuestas = iter([
-        "XX-- ###",  # Página mal orientada
+        "XX-- ###",  # Primera lectura mal orientada
+        "texto ilegible",  # Segundo modo OCR, todavía incorrecto
         "Certificado de cumplimiento de obligaciones laborales y previsionales"
     ])
     monkeypatch.setattr(
