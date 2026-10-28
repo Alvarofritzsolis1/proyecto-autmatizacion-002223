@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import time
 import streamlit as st
+import pandas as pd
+from f301_lector import analizar_f301, es_f301
 
 from auditoria_laboral import (
     COLUMNAS_SALIDA,
@@ -17,7 +19,7 @@ st.set_page_config(
 )
 
 st.title("📊 Auditoría laboral de contratistas")
-st.caption("Carga planillas, revisa alertas y descarga una matriz Excel estandarizada.")
+st.caption("Carga F30-1 y comprobantes Previred, revisa resultados claros y descarga Excel.")
 
 # Chat visible desde que se abre la aplicación, incluso sin archivos cargados.
 from chat_asesor import mostrar_chat
@@ -45,7 +47,7 @@ st.subheader("1. Cargar documentos")
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024  # Protección frente a límites de memoria del hosting gratuito.
 archivos_subidos = st.file_uploader(
-    "Selecciona una o varias planillas de remuneraciones",
+    "Sube F30-1, cotizaciones Previred o planillas Excel/CSV",
     type=["xlsx", "xls", "csv", "pdf"],
     accept_multiple_files=True,
     max_upload_size=25,
@@ -129,20 +131,40 @@ if st.button(
 
     try:
         comienzo = time.perf_counter()
-        with st.spinner("Leyendo anexos relevantes y ejecutando auditoría (OCR selectivo para escaneos)..."):
-            matriz, excel_bytes, detalle, log = ejecutar_pipeline(
-                entradas,
-                topes_csv=topes_bytes,
-                nombre_topes=topes_subido.name if topes_subido else "topes.csv",
-                tolerancia_clp=int(tolerancia),
-                incluir_mutual=incluir_mutual,
+        with st.spinner("Identificando F30-1 y comprobantes de cotizaciones..."):
+            # Separar certificados F30-1 antes del motor Previred.
+            # No asumir que un F30-1 sin página de resumen acredita pagos.
+            archivos_f301, archivos_previred = [], []
+            for contenido, nombre in entradas:
+                if nombre.lower().endswith(".pdf") and es_f301(contenido, nombre):
+                    archivos_f301.append((contenido, nombre))
+                else:
+                    archivos_previred.append((contenido, nombre))
+            certs, nomina, incidencias = (
+                analizar_f301(archivos_f301) if archivos_f301 else ([], [], [])
             )
+            if archivos_previred:
+                matriz, excel_bytes, detalle, log = ejecutar_pipeline(
+                    archivos_previred,
+                    topes_csv=topes_bytes,
+                    nombre_topes=topes_subido.name if topes_subido else "topes.csv",
+                    tolerancia_clp=int(tolerancia),
+                    incluir_mutual=incluir_mutual,
+                )
+            else:
+                matriz = pd.DataFrame(columns=COLUMNAS_SALIDA)
+                excel_bytes = None
+                detalle = pd.DataFrame()
+                log = pd.DataFrame()
         st.session_state["reporte_auditoria"] = {
             "firma": firma.hexdigest(),
             "matriz": matriz,
             "excel": excel_bytes,
             "detalle": detalle,
             "log": log,
+            "f301_certificados": certs,
+            "f301_nomina": nomina,
+            "f301_incidencias": incidencias,
             "duracion_s": round(time.perf_counter() - comienzo, 2),
         }
     except Exception as exc:
@@ -162,6 +184,41 @@ if reporte:
     firma_actual.update(str(bool(incluir_mutual)).encode())
     if firma_actual.hexdigest() == reporte["firma"]:
         matriz = reporte["matriz"]
+        certs = reporte.get("f301_certificados", [])
+        if certs:
+            st.subheader("Certificados F30-1 identificados")
+            for cert in certs:
+                with st.container(border=True):
+                    st.markdown(
+                        f"**{cert['contratista'] or 'Empleador pendiente de lectura'}** "
+                        f"· **{cert['periodo'] or 'Período pendiente'}**"
+                    )
+                    cols = st.columns(3)
+                    cols[0].metric("Trabajadores declarados", cert["trabajadores_declarados"] if cert["trabajadores_declarados"] is not None else "No informado")
+                    cols[1].metric("RUT recuperados", cert["trabajadores_identificados"])
+                    cols[2].metric("Páginas leídas", cert["paginas"])
+                    if cert["cotizaciones"] == "SI_DECLARADO_EN_PDF":
+                        st.success("Cotizaciones: el resumen del PDF declara pagadas. Autenticidad DT pendiente.")
+                    elif cert["cotizaciones"] == "SIN_RESUMEN_NO_SE_PUEDE_CONFIRMAR":
+                        st.warning("Certificado y nómina identificados; falta página de resumen. No se puede confirmar el estado de pago.")
+                    else:
+                        st.warning("Estado de pago no confirmado: " + cert["cotizaciones"])
+                    if cert["observaciones"]:
+                        st.caption("Revisar: " + cert["observaciones"])
+                    st.caption("Folio: " + cert["folio"] + " · Verificación oficial DT: pendiente")
+            with st.expander("Ver nómina F30-1 recuperada"):
+                st.dataframe(pd.DataFrame(reporte.get("f301_nomina", [])),
+                             use_container_width=True, hide_index=True)
+            st.link_button("Verificar certificado en la Dirección del Trabajo",
+                           "https://verificador.dirtrab.cl/")
+        elif reporte.get("f301_incidencias"):
+            st.error("No se pudo recuperar el certificado F30-1.")
+        if reporte.get("f301_incidencias"):
+            with st.expander("Detalle técnico de lectura F30-1"):
+                st.dataframe(pd.DataFrame(reporte["f301_incidencias"]),
+                             use_container_width=True, hide_index=True)
+        if matriz.empty and certs:
+            st.caption("No se cargaron cotizaciones Previred: se presenta únicamente la lectura F30-1.")
         st.caption(f"Tiempo de procesamiento: {reporte.get('duracion_s', 0):.1f} segundos. "
                    "Varía según calidad del escaneo, cantidad de páginas y capacidad del servidor.")
         resumen = matriz["estado_auditoria"].value_counts()
@@ -183,13 +240,14 @@ if reporte:
         st.subheader("Resultado por archivo")
         st.dataframe(reporte["log"], use_container_width=True, hide_index=True)
 
-        st.download_button(
-            "📥 Descargar matriz Excel de auditoría",
-            data=reporte["excel"],
-            file_name="Matriz_Auditoria_Subcontratistas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-        )
+        if reporte.get("excel") is not None:
+            st.download_button(
+                "📥 Descargar matriz Excel de auditoría",
+                data=reporte["excel"],
+                file_name="Matriz_Auditoria_Subcontratistas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+            )
     else:
         st.info("Cambiaste los archivos o las opciones después del último análisis. Ejecuta nuevamente la auditoría para actualizar el informe.")
 
