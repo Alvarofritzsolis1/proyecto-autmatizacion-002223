@@ -1,4 +1,4 @@
-name: Revision nocturna de calidad
+name: GALANT - revision nocturna de calidad
 on:
   schedule:
     - cron: '17 8 * * *'
@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
       - name: Validar Python
-        run: python -m compileall -q app.py chat_asesor.py aprendizaje_continuo.py
+        run: python -m compileall -q app.py auditoria_laboral.py f301_lector.py f301_nomina_reforzada.py cruce_documental_galant.py previred_pdf.py previred_scan_fast.py aprendizaje_continuo.py
       - name: Tests
         run: python -m pytest -q
       - name: Evaluar aprendizaje sin publicar cambios

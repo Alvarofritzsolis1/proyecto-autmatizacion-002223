@@ -1,4 +1,4 @@
-# Lectura F30-1 mejorada — actualización del repositorio
+# GALANT — lectura F30-1 mejorada
 
 El botón principal **Ejecutar auditoría** ahora detecta automáticamente certificados
 F30-1, aunque tengan un nombre distinto y vengan escaneados como imagen sin capa de texto.
@@ -46,4 +46,4 @@ No se inventan RUT ni el estado de cotizaciones. Para comprobar autenticidad
 utiliza https://verificador.dirtrab.cl/.
 
 El repositorio es público. No subas PDF reales, RUT, claves ni nóminas.
-El chat Gemini funciona por separado y no recibe los archivos F30-1 ni sus RUT.
+GALANT no incluye chat ni envía certificados F30-1 a servicios externos de IA.

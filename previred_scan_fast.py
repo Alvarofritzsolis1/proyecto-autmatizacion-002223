@@ -371,6 +371,23 @@ def _contexto(documento: bytes, plantillas:list[Plantilla]) -> tuple[str,str,str
     return nombre.upper(),empleador_rut,periodo,'ACHS' if any(p.tipo=='mutual' for p in plantillas) else ''
 
 
+def _advertencias_ocr_por_trabajador(invalidas, fuentes_rut):
+    """Aplicar advertencias OCR a filas reconocidas, sin perder avisos globales."""
+    referencias={(pagina,fila+1)
+                 for movimientos in fuentes_rut.values()
+                 for pagina,fila,_,_ in movimientos}
+    resultado=[]
+    for aviso in invalidas:
+        match=re.match(r'^p\.(\d+), fila (\d+): (.*)$',aviso)
+        if not match:
+            resultado.append(aviso)
+        elif 'RUT no reconocido' in aviso or 'base imponible no reconocida' in aviso:
+            resultado.append(aviso)
+        elif (int(match.group(1)),int(match.group(2))) in referencias:
+            resultado.append(aviso)
+    return list(dict.fromkeys(resultado))
+
+
 def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFrame|None:
     """Extractor opcional para PREVIRED escaneado, no sustituye lectura digital.
 
@@ -490,14 +507,7 @@ def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFram
     ruts_consolidado=set(datos)
     if ruts_salud!=ruts_consolidado:
         invalidas.append('No coinciden los RUT entre Salud y las demás instituciones')
-    if 'seguro_social' in totales and totales['seguro_social']!=totales['salud']:
-        invalidas.append('Total Seguro Social diferente de Salud')
-    if 'afp' in totales and totales['afp']!=totales['salud']:
-        invalidas.append('Total AFP diferente de Salud')
-    if 'mutual' in totales and totales['mutual']!=totales['salud']:
-        invalidas.append('Total Mutual diferente de Salud')
-    if any(v!=tam_fuentes.get('salud') for v in tam_fuentes.values()):
-        invalidas.append('No coinciden los recuentos de trabajadores entre instituciones')
+    # No imputar una diferencia global AFP/Seguro Social a todos: cotejar por RUT.
     if not nombres_empleador or not rut_empleador or not periodo:
         invalidas.append('Falta información verificada de empleador o período en cabecera OCR')
     salida=[]
@@ -516,13 +526,26 @@ def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFram
             obs.append('Días de Salud ilegibles')
         rentas=[base('salud'),base('afp'),base('mutual')]
         if len({x for x in rentas if x is not None})>1:
-            obs.append('Descuadre de bases entre instituciones')
-        if invalidas:obs.append('Verificar extracción OCR: '+'; '.join(dict.fromkeys(invalidas[:8])))
-        if not nombres.get(rut):obs.append('Nombre del trabajador no confirmado en anexo Salud')
+            obs.append('Bases AFP, Salud y Mutual distintas en este RUT; revisar régimen y documentos')
+        if fuentes_rut.get('seguro_social'):
+            if base('salud') is not None and base('seguro_social')!=base('salud'):
+                obs.append('Base Seguro Social distinta de Salud para este trabajador')
+        elif 'seguro_social' in fuentes:
+            obs.append('Trabajador no hallado en Seguro Social: verificar si corresponde cotizar')
+        invalidas_de_este_rut=_advertencias_ocr_por_trabajador(invalidas,fuentes_rut)
+        if invalidas_de_este_rut:
+            obs.append('Verificar OCR: '+'; '.join(invalidas_de_este_rut[:8]))
+        if not nombres.get(rut):
+            obs.append('Nombre no confirmado en anexo Salud')
         paginas=sorted({r[0] for v in fuentes_rut.values() for r in v})
-        # Conservador: toda fila obtenida por OCR se marca para revisión humana,
-        # aunque los valores cuadren; no confundir extracción con certificación.
-        obs.append('OCR de imagen: cotejar con comprobante original antes de aprobar')
+        cotejo_ocr=bool(
+            not obs and all(fuentes_rut.get(t) for t in ('salud','afp','mutual'))
+            and all(x is not None and x>0 for x in rentas)
+            and len(set(rentas))==1 and dia_s is not None and 0<dia_s<=31
+            and nombres.get(rut) and rut_empleador and periodo
+        )
+        if not cotejo_ocr:
+            obs.append('OCR sin conciliación completa: cotejar páginas originales')
         salida.append({
             'periodo_remuneracion':periodo,
             'contratista_nombre':nombres_empleador,
@@ -535,6 +558,7 @@ def extraer_previred_escaneado_rapido(contenido:bytes,nombre:str) -> pd.DataFram
             'renta_imponible_mutual':base('mutual'),
             'mutual_adherida':mutual,
             '__hoja_origen':', '.join(f'p.{z}' for z in paginas),
+            '__ocr_estado':'OCR_COTEJO_BASES_DIAS' if cotejo_ocr else 'OCR_REQUIERE_REVISION',
             '__conflicto_pdf':'; '.join(obs),
         })
     return pd.DataFrame(salida)
