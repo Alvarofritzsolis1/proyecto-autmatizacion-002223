@@ -119,3 +119,64 @@ def test_totales_portadas_por_institucion_no_suman_cotizaciones():
     assert _totales_resumen(textos) == {
         "seguro_social": 58392, "salud": 58392, "afp": 58392, "mutual": 58392,
     }
+
+
+def test_movimientos_previred_cero_no_son_ruts_invalidos():
+    """Filas a cero son movimientos del mismo trabajador, no otros cotizantes."""
+    from previred_pdf import _movimiento_sin_renta, _parsear_fila
+    rut = "12.345.678-5"
+    casos = [
+        ("salud",
+         f"2 {rut} ALVAREZ PEREZ MARIA JOSE 0 AFP 0 0 4 14 02 2026 28 02 2026"),
+        ("seguro_social",
+         f"2 {rut} ALVAREZ PEREZ MARIA JOSE 0 0 0 0 0 JC 0 4 14/02/2026 28/02/2026"),
+        ("afp",
+         f"{rut} ALVAREZ PEREZ MARIA JOSE 0 0 0 0 0 0 0 0 0 4 14/02/2026 28/02/2026"),
+        ("mutual",
+         f"{rut} ALVAREZ PEREZ MARIA JOSE 0 0 5 14/02/2026 28/02/2026"),
+    ]
+    for tipo, linea in casos:
+        rut_leido, sin_renta = _movimiento_sin_renta(linea, tipo)
+        assert rut_leido == "123456785"
+        assert sin_renta
+        parsed = _parsear_fila(linea, tipo)
+        if parsed is not None:
+            assert parsed["renta"] == 0
+
+
+def test_aviso_pdf_no_acusa_ruts_validos_ni_se_repite_por_persona():
+    import pandas as pd
+    from bandeja_revision import generar_bandeja
+    texto = (
+        "Conflicto entre tablas del PDF: Los totales del comprobante no cuadran "
+        "con el detalle: Resumen salud: renta $841,046 vs filas $702,645; "
+        "Existen filas no interpretadas: Página 2, salud: "
+        "fila con formato inesperado o RUT inválido"
+    )
+    detalle = pd.DataFrame([
+        {
+            "archivo_origen": "comprobante_sintetico.pdf",
+            "contratista_nombre": "EMPRESA FICTICIA",
+            "periodo_remuneracion": "2026-08",
+            "trabajador_rut": rut,
+            "estado_auditoria": "REVISAR_DATOS",
+            "motivo_revision": texto,
+        }
+        for rut in ("123456785", "100000008", "111111111")
+    ])
+    bandeja = generar_bandeja(detalle=detalle)
+    assert len(bandeja) == 1
+    assert bandeja.iloc[0]["rut_trabajador"] == ""
+    assert bandeja.iloc[0]["prioridad"] == "MEDIA"
+    assert "Lectura" in bandeja.iloc[0]["hallazgo"] or "leer" in bandeja.iloc[0]["hallazgo"]
+    assert "RUT sin validación" not in bandeja.iloc[0]["hallazgo"]
+
+
+def test_no_ocultar_diferencia_de_extraccion_real():
+    from bandeja_revision import _detalle_revision
+    problema, accion = _detalle_revision(
+        "Lectura parcial del PDF: no fue posible conciliar SALUD: "
+        "resumen $841,046; leído $702,645"
+    )
+    assert problema == "Lectura pendiente"
+    assert "Revisar" in accion
