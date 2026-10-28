@@ -20,6 +20,6 @@ jobs:
       - name: Instalar dependencias
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - name: Verificar sintaxis
-        run: python -m compileall -q app.py auditoria_laboral.py f301_lector.py f301_nomina_reforzada.py cruce_documental_galant.py previred_pdf.py previred_scan_fast.py test_galant_revision.py
+        run: python -m compileall -q app.py auditoria_laboral.py f301_lector.py f301_nomina_reforzada.py bandeja_revision.py informe_galant.py cruce_documental_galant.py previred_pdf.py previred_scan_fast.py test_galant_revision.py
       - name: Ejecutar pruebas de lógica y de aplicación
         run: python -m pytest -q
