@@ -4,9 +4,9 @@ import json
 import re
 import streamlit as st
 
-RUT = re.compile(r"(?<!\\w)(?:\\d{1,2}\\.?\\d{3}\\.?\\d{3}[- ]?[0-9kK])(?!\\w)")
-EMAIL = re.compile(r"[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}")
-PHONE = re.compile(r"(?<!\\d)(?:\\+56\\s*)?9\\s*\\d{4}\\s*\\d{4}(?!\\d)")
+RUT = re.compile(r"(?<!\w)(?:\d{1,2}\.?\d{3}\.?\d{3}[- ]?[0-9kK])(?!\w)")
+EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+PHONE = re.compile(r"(?<!\d)(?:\+56\s*)?9\s*\d{4}\s*\d{4}(?!\d)")
 
 def anonimizar(mensaje: str) -> str:
     texto = RUT.sub("[RUT OMITIDO]", mensaje)
