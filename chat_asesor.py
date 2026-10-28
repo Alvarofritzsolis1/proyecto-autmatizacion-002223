@@ -41,7 +41,7 @@ def diagnostico_local(pregunta: str) -> str:
             "campo que falló y página, sin aportar datos personales.")
 
 def respuesta_ia(pregunta: str, resumen: dict, historial: list[dict],
-                 clave: str, modelo: str = "gpt-5.5") -> str:
+                 clave: str, modelo: str = "gpt-5-mini") -> str:
     from openai import OpenAI
     mensajes = [
         {"role": m["role"], "content": anonimizar(m["content"])}
@@ -67,9 +67,9 @@ def mostrar_chat(reporte: dict | None):
     st.caption("Explica errores de lectura y sugiere verificaciones. No cambia automáticamente la auditoría.")
     try:
         clave = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
-        modelo = str(st.secrets.get("OPENAI_MODEL", "gpt-5.5"))
+        modelo = str(st.secrets.get("OPENAI_MODEL", "gpt-5-mini"))
     except Exception:
-        clave, modelo = "", "gpt-5.5"
+        clave, modelo = "", "gpt-5-mini"
     with st.expander("IA, privacidad y consentimiento"):
         st.write("Sin clave funciona como ayuda local. Con API, se envía tu pregunta anonimizada "
                  "y un resumen de cantidades; jamás los PDF ni las nóminas. "
