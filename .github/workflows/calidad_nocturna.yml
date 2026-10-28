@@ -1,0 +1,37 @@
+name: Revision nocturna de calidad
+on:
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validacion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Herramientas OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-spa
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      - name: Validar Python
+        run: python -m compileall -q app.py chat_asesor.py aprendizaje_continuo.py
+      - name: Tests
+        run: python -m pytest -q
+      - name: Evaluar aprendizaje sin publicar cambios
+        run: python aprendizaje_continuo.py
+      - name: Informe de calidad
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informe-calidad
+          path: informe_calidad_nocturno.json
+          if-no-files-found: ignore
