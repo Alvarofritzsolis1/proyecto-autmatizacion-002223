@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.env
+.streamlit/secrets.toml
+*.pdf
+*.xlsx
+*.xls
+*.joblib
+correcciones_privadas*.json
+informe_calidad_nocturno.json
+datos_privados/
+modelos/
+documentos/
