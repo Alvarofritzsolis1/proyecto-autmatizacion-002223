@@ -12,7 +12,7 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 
-VERSION = "17.0"
+VERSION = "18.0"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -185,6 +185,11 @@ elif reporte:
     for error in reporte["errores"]:
         st.error("Un grupo de archivos no se pudo procesar: " + error)
 
+    if not certificados and not matriz.empty:
+        st.caption(
+            "No se cargó un F30-1 en esta revisión: «F30-1 leídos: 0» "
+            "es normal cuando se analizan solamente cotizaciones Previred."
+        )
     if not reporte["errores"] and not certificados and matriz.empty:
         st.warning("No se recuperaron registros. Revisa si los archivos contienen páginas legibles.")
 

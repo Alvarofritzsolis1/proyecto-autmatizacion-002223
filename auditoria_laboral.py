@@ -897,6 +897,15 @@ def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
         with fitz.open(stream=contenido, filetype="pdf") as probe:
             digital = any(len(probe[i].get_text().strip()) > 120 for i in range(min(2,probe.page_count)))
         if not digital:
+            # 1) Estructura geométrica adaptativa: corrige páginas A4 con
+            #    tablas internamente giradas y lee solo celdas verificables.
+            #    Restituye el lector probado en escaneos AFP/Salud/Mutual
+            #    que el OCR de texto y las retículas rígidas descartaban.
+            from previred_scan_adaptativo import extraer_previred_scan_adaptativo
+            adaptativo = extraer_previred_scan_adaptativo(contenido, nombre)
+            if adaptativo is not None:
+                return adaptativo
+            # 2) Retículas históricas: conservar la compatibilidad anterior.
             from previred_scan_fast import extraer_previred_escaneado_rapido
             escaneado = extraer_previred_escaneado_rapido(contenido, nombre)
             if escaneado is not None:

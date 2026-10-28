@@ -1,3 +1,31 @@
+# GALANT v18 — OCR adaptativo de Previred escaneado
+
+Esta versión recupera el OCR estructural que faltaba en GitHub para
+formularios escaneados de **Previred**, especialmente PDF de diez páginas
+con tablas impresas de lado. Se añade **antes** del OCR rígido y del
+OCR de texto, preservando los lectores previos para formatos diferentes.
+
+El análisis detecta páginas de Seguro Social, AFP, ACHS y Fonasa por
+encabezado, busca líneas y columnas, lee RUT/cifras por celda con
+dos escalas y valida dígitos verificadores, días y bases. La renta
+de Seguro de Cesantía **jamás sustituye** la base del fondo AFP.
+
+**Prueba local previa a la integración**, con documento aportado
+privadamente por el usuario: 4/4 trabajadores; 10 días por persona;
+Salud y ACHS $962.778 total; fondo AFP $691.944. Un trabajador con
+fondo AFP cero requiere revisar su régimen o exención. Esos datos no
+autorizan declarar una cotización impaga.
+
+Los documentos originales NO se publican en GitHub. Pruebas del
+repositorio: casos sintéticos, ninguna nómina laboral real.
+
+**Límite:** la corrección está validada para esta clase de retícula,
+pero no garantiza reconocimiento del 100 % de los PDF escaneados.
+Si faltan RUT o no se reconoce un encabezado, GALANT debe mostrar
+la observación y no aprobar cifras por suposición.
+
+---
+
 # GALANT v17 — revisión documental con bandeja y evidencia
 
 La plataforma combina OCR de F30-1, Previred y Excel con una **bandeja priorizada** que muestra qué revisar primero. No utiliza chat ni API de pago.
