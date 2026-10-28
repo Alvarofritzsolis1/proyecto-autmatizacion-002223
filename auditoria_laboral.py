@@ -897,6 +897,15 @@ def leer_archivo(contenido: bytes, nombre: str) -> pd.DataFrame:
         with fitz.open(stream=contenido, filetype="pdf") as probe:
             digital = any(len(probe[i].get_text().strip()) > 120 for i in range(min(2,probe.page_count)))
         if not digital:
+            # GALANT v18: primero lector de separadores reales. Recupera
+            # escaneos Previred girados cuyo OCR normal reconoce texto pero
+            # confunde columnas, AFP Fondo / Seguro de Cesantía y filas.
+            # No se ejecuta para PDFs digitales ya legibles.
+            from previred_scan_adaptativo import extraer_previred_scan_adaptativo
+            adaptado = extraer_previred_scan_adaptativo(contenido, nombre)
+            if adaptado is not None and not adaptado.empty:
+                return adaptado
+        if not digital:
             from previred_scan_fast import extraer_previred_escaneado_rapido
             escaneado = extraer_previred_escaneado_rapido(contenido, nombre)
             if escaneado is not None:
