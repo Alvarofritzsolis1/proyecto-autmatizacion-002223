@@ -1346,6 +1346,7 @@ def ejecutar_pipeline(
                     "trabajador_rut": "rut_trabajador",
                     "__hoja_origen": "paginas_de_respaldo",
                     "__conflicto_pdf": "advertencias_de_extraccion",
+                    "__ocr_estado": "calidad_ocr",
                 }
                 for columna in columnas_traza:
                     if columna not in limpio.columns:
