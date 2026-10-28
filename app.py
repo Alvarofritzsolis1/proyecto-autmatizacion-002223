@@ -12,7 +12,7 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 
-VERSION = "18.0"
+VERSION = "18.1"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.title("GALANT")
-st.caption("Control documental de contratistas · F30-1, Previred y cotizaciones previsionales")
+st.caption(f"v{VERSION} · Control documental de contratistas · F30-1, Previred y cotizaciones previsionales")
 st.write("Sube los documentos, presiona **Analizar** y revisa únicamente las diferencias detectadas.")
 
 with st.expander("Alcance y privacidad del análisis", expanded=False):
