@@ -110,6 +110,8 @@ def test_montos_no_se_inventan_cuando_ocr_ilegible():
     assert _numeros_ocr("abc") is None
     assert _numeros_ocr("1.2.3") is None
     assert _numeros_ocr("230.648") == 230648
+    assert _numeros_ocr("2O0") is None  # No convertir letra O a cero
+    assert _numeros_ocr("1?23") is None
 
 
 def test_detector_geometrico_acepta_tabla_con_filas_variables():
