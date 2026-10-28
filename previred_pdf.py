@@ -209,6 +209,31 @@ def _totales_resumen(textos: list[str]) -> dict[str, int]:
     return {tipo: sum(importes) for tipo, importes in acumulados.items()}
 
 
+def _movimiento_sin_renta(linea: str, tipo: str) -> tuple[str, bool]:
+    """Permite reconocer un movimiento a $0 aunque su disposición varíe.
+
+    En Previred un mismo trabajador puede tener varias filas de permiso,
+    cese o inicio. Una fila a $0 no es otro trabajador ni una diferencia
+    de renta; nunca se convierte en base positiva por inferencia.
+    """
+    m = ROW_RE.match(linea)
+    if not m:
+        return "", False
+    rut = _rut_clean(m.group("rut"))
+    if not _rut_ok(rut):
+        return rut, False
+    datos = m.group("numeros").split()
+    if not datos:
+        return rut, False
+    posicion = 2 if tipo == "salud" else 0
+    if tipo == "salud" and (
+        len(datos) < 3 or datos[1].upper() not in
+        ("AFP", "IPS", "INP", "SSS", "DIPRECA", "CAPRECA")
+    ):
+        return rut, False
+    return rut, len(datos) > posicion and _peso(datos[posicion]) == 0
+
+
 def _letra_montaje(tipo: str) -> str:
     return {"salud": "renta_imponible_salud", "afp": "renta_imponible_afp", "mutual": "renta_imponible_mutual", "seguro_social": "renta_seguro_social"}[tipo]
 
@@ -270,7 +295,7 @@ def extraer_previred(
     por_fuente: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     paginas_por_fuente: dict[str, dict[str, set[int]]] = defaultdict(lambda: defaultdict(set))
     fuentes_encontradas = {tipo for _, tipo in tipos}
-    filas_rechazadas: list[str] = []
+    filas_rechazadas: list[tuple[int, str, str, bool]] = []
     for index, tipo in tipos:
         texto = textos[index]
         for linea in texto.splitlines():
@@ -278,13 +303,25 @@ def extraer_previred(
                 continue
             dato = _parsear_fila(linea, tipo)
             if dato is None:
-                # No alertar sobre cabeceras con RUT, solo posibles filas de trabajador.
-                if re.match(r"^\s*(?:\d{1,3}\s+)?" + RUT, linea) and any(c.isdigit() for c in linea.split()[-4:]):
-                    filas_rechazadas.append(f"Página {index+1}, {tipo}: fila con formato inesperado o RUT inválido")
+                # El parser puede rechazar un MOVIMIENTO a $0 cuyo RUT sea
+                # válido. No llamarlo RUT inválido ni duplicado: revisar si
+                # ese RUT sí tiene otro movimiento interpretable en la fuente.
+                m = re.match(r"^\s*(?:\d{1,3}\s+)?(" + RUT + r")", linea)
+                if m:
+                    rut = _rut_clean(m.group(1))
+                    _, cero = _movimiento_sin_renta(linea, tipo)
+                    filas_rechazadas.append((index + 1, tipo, rut, cero))
                 continue
             dato["pagina"] = index + 1
             por_fuente[tipo][dato["rut"]].append(dato)
             paginas_por_fuente[tipo][dato["rut"]].add(index + 1)
+    # No emitir advertencias falsas por movimientos de $0 de trabajadores
+    # ya identificados correctamente en la misma institución.
+    filas_no_verificadas = [
+        (pagina, tipo, rut)
+        for pagina, tipo, rut, cero in filas_rechazadas
+        if not (cero and rut in por_fuente[tipo])
+    ]
 
     # Cuadratura contra comprobantes resumen. Detecta omisiones silenciosas de
     # trabajadores o rentas, incluso cuando el OCR devolvió otras filas válidas.
@@ -294,7 +331,7 @@ def extraer_previred(
         monto_detalle = sum(x["renta"] for grupos in por_fuente[tipo].values() for x in grupos)
         if monto_detalle != monto_resumen:
             alertas_totales.append(
-                f"Resumen {tipo}: renta ${monto_resumen:,} vs filas ${monto_detalle:,}"
+                f"{tipo.upper()}: resumen ${monto_resumen:,}; leído ${monto_detalle:,}"
             )
 
     ruts = set().union(*(set(fuente.keys()) for fuente in por_fuente.values()))
@@ -352,11 +389,15 @@ def extraer_previred(
         if not mutual:
             obs.append("Mutual no identificada en el documento")
         if alertas_totales:
-            obs.append("Los totales del comprobante no cuadran con el detalle: " + "; ".join(alertas_totales))
-        if filas_rechazadas:
-            # Un RUT mal reconocido por OCR puede generar trabajador faltante. Evita aprobaciones
-            # silenciosas si hay alguna fila de trabajadores descartada en el archivo.
-            obs.append("Existen filas no interpretadas: " + "; ".join(filas_rechazadas[:3]))
+            # Es una diferencia de LECTURA automática, no una prueba de
+            # cotizaciones erradas ni de RUT inválido del trabajador.
+            obs.append("Lectura parcial del PDF: no fue posible conciliar "
+                       + "; ".join(alertas_totales))
+        if filas_no_verificadas:
+            paginas = sorted({p for p, _, _ in filas_no_verificadas})
+            obs.append("Filas sin interpretar en páginas "
+                       + ", ".join(str(p) for p in paginas[:6])
+                       + "; revisar lectura automática")
         if pagina_ocr:
             obs.append("Se aplicó OCR; verificar cifras de las páginas escaneadas antes de aprobar")
         resultados.append({
