@@ -32,6 +32,19 @@ def _valor(dato) -> str:
 def _detalle_revision(texto: str) -> tuple[str, str]:
     """Separa problemas de extracción de diferencias documentales reales."""
     k = texto.lower()
+    # Advertencias del extractor no significan que el RUT del trabajador sea
+    # inválido. Evitar elevar todas las filas a prioridad ALTA por una palabra
+    # "RUT inválido" dentro de un mensaje técnico global.
+    if any(x in k for x in (
+        "lectura parcial del pdf",
+        "totales del comprobante no cuadran",
+        "existen filas no interpretadas",
+        "filas sin interpretar",
+    )):
+        return (
+            "Lectura pendiente",
+            "Revisar las filas no reconocidas del PDF. No significa deuda ni RUT inválido."
+        )
     if re.search(r"r[uú]t.*(?:invalido|inv[aá]lido|d[ií]gito verificador)", k):
         return ("RUT sin validación", "Cotejar RUT con el original y corregir OCR si corresponde.")
     if "duplicad" in k:
@@ -133,14 +146,26 @@ def generar_bandeja(
             prioridad = "ALTA" if estado.startswith("ALERTA") else "MEDIA"
             if "RUT sin validación" == problema:
                 prioridad = "ALTA"
-            agregar(
-                prioridad, "Cotizaciones", problema + ": " + motivo[:450],
-                accion, archivo=fila.get("archivo_origen", ""),
-                pagina=fila.get("hoja_o_pagina", ""),
-                contratista=fila.get("contratista_nombre", ""),
-                periodo=fila.get("periodo_remuneracion", ""),
-                rut=fila.get("trabajador_rut", ""), referencia=estado
-            )
+            if problema == "Lectura pendiente":
+                # Un problema de extracción del ARCHIVO no debe aparecer como
+                # tres errores de RUT individuales. Se muestra una sola vez.
+                prioridad = "MEDIA"
+                agregar(
+                    prioridad, "Cotizaciones",
+                    "Hay filas o montos que GALANT no logró leer completamente.",
+                    accion, archivo=fila.get("archivo_origen", ""),
+                    contratista=fila.get("contratista_nombre", ""),
+                    periodo=fila.get("periodo_remuneracion", "")
+                )
+            else:
+                agregar(
+                    prioridad, "Cotizaciones", problema + ": " + motivo[:240],
+                    accion, archivo=fila.get("archivo_origen", ""),
+                    pagina=fila.get("hoja_o_pagina", ""),
+                    contratista=fila.get("contratista_nombre", ""),
+                    periodo=fila.get("periodo_remuneracion", ""),
+                    rut=fila.get("trabajador_rut", ""), referencia=estado
+                )
 
     if cruce_resumen is not None and not cruce_resumen.empty:
         for _, fila in cruce_resumen.iterrows():
