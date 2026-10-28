@@ -19,6 +19,12 @@ st.set_page_config(
 st.title("📊 Auditoría laboral de contratistas")
 st.caption("Carga planillas, revisa alertas y descarga una matriz Excel estandarizada.")
 
+# Chat visible desde que se abre la aplicación, incluso sin archivos cargados.
+from chat_asesor import mostrar_chat
+with st.container(border=True):
+    mostrar_chat(st.session_state.get("reporte_auditoria"))
+
+
 with st.expander("Antes de comenzar: qué hace y qué no hace", expanded=True):
     st.write(
         "El sistema lee Excel/CSV y comprobantes PDF, y reconoce los anexos de Previred "
@@ -187,7 +193,3 @@ if reporte:
     else:
         st.info("Cambiaste los archivos o las opciones después del último análisis. Ejecuta nuevamente la auditoría para actualizar el informe.")
 
-
-# Chat opcional: no altera el motor ni los resultados de la auditoria.
-from chat_asesor import mostrar_chat
-mostrar_chat(st.session_state.get('reporte_auditoria'))
