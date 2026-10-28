@@ -12,7 +12,7 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 
-VERSION = "18.1"
+VERSION = "18.2"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -184,6 +184,12 @@ elif reporte:
         )
     for error in reporte["errores"]:
         st.error("Un grupo de archivos no se pudo procesar: " + error)
+    if reporte["errores"]:
+        st.caption(
+            f"Diagnóstico de versión: GALANT v{VERSION}. Si el error anterior "
+            "no contiene el código GALANT-OCR-182, verifica que Streamlit "
+            "esté desplegado desde este repositorio, rama main y app.py."
+        )
 
     if not certificados and not matriz.empty:
         st.caption(
