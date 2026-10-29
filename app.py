@@ -40,6 +40,15 @@ def _huella_motor():
     fuente = Path(__file__).with_name("fonasa_nomina_simple.py")
     return hashlib.sha256(fuente.read_bytes()).hexdigest()[:16]
 
+
+def _version_tesseract():
+    try:
+        return str(pytesseract.get_tesseract_version())
+    except (RuntimeError, OSError, pytesseract.TesseractNotFoundError):
+        # La ausencia de Tesseract debe mostrarse como fallo de entorno,
+        # sin hacer que Streamlit se caiga antes de mostrar el diagnóstico.
+        return "NO DISPONIBLE"
+
 st.caption(
     f"Control documental de contratistas · {VERSION} "
     f"· lector { _huella_motor() }"
@@ -318,7 +327,7 @@ if st.button(
             "python": sys.version.split()[0],
             "sistema": platform.system(),
             "opencv": cv2.__version__,
-            "tesseract": str(pytesseract.get_tesseract_version()),
+            "tesseract": _version_tesseract(),
             "streamlit": st.__version__,
         },
         "tiempos_pagos": tiempos_pagos,
