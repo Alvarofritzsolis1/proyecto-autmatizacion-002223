@@ -15,7 +15,7 @@ from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 from fonasa_nomina_simple import extraer_nomina_fonasa
 
-VERSION = "18.6-Fonasa-simple"
+VERSION = "18.6.1-Fonasa-dias"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
