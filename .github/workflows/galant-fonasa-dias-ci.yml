@@ -1,12 +1,14 @@
 name: GALANT - regresion 20 celdas Fonasa
 on:
   push:
-    branches: [fix/galant-fonasa-dias-11-27-20261029, fix/galant-invalidar-cache-fonasa-v1862, main]
+    branches: [fix/galant-fonasa-dias-11-27-20261029, fix/galant-invalidar-cache-fonasa-v1862, fix/galant-fonasa-trazabilidad-real-20261029, main]
     paths:
       - 'fonasa_nomina_simple.py'
       - 'app.py'
       - 'tests/test_fonasa_dias_robustos.py'
       - 'tests/test_streamlit_fonasa_cache.py'
+      - 'fonasa_validacion.py'
+      - 'tests/test_fonasa_trazabilidad.py'
       - '.github/workflows/galant-fonasa-dias-ci.yml'
   pull_request:
     paths:
