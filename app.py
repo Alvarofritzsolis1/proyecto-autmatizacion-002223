@@ -283,6 +283,33 @@ elif reporte:
                 "Observación": ev["observacion"],
             })
     if filas_pago:
+        alertas_fecha = sum(
+            bool(e.get("conflicto_fecha_ocr"))
+            for doc in reporte.get("pagos_documentales", [])
+            for e in doc.get("comprobantes", [])
+        )
+        sin_folio = sum(
+            not bool(e.get("folio"))
+            for doc in reporte.get("pagos_documentales", [])
+            for e in doc.get("comprobantes", [])
+        )
+        sin_institucion = sum(
+            "no identificada" in str(e.get("institucion", "")).lower()
+            for doc in reporte.get("pagos_documentales", [])
+            for e in doc.get("comprobantes", [])
+        )
+        if alertas_fecha:
+            st.error(
+                f"{alertas_fecha} comprobante(s) con fechas contradictorias "
+                "entre el texto OCR y el cuadro de Pago Electrónico. "
+                "Revisar la página antes de aprobar el pago."
+            )
+        if sin_folio or sin_institucion:
+            st.warning(
+                f"Identificación parcial: {sin_folio} comprobante(s) sin folio "
+                f"y {sin_institucion} sin institución identificada. "
+                "Aunque exista fecha de pago, confirmar el respaldo antes de aprobar."
+            )
         completos = sum(
             bool(e.get("periodo") and e.get("fecha_pago"))
             for doc in reporte.get("pagos_documentales", [])
