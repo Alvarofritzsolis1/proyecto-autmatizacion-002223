@@ -342,14 +342,22 @@ elif reporte:
         "El estado proviene de los documentos: no equivale a confirmación "
         "oficial de Previred ni de la institución recaudadora."
     )
-    st.markdown("**Qué revisar**")
+    st.markdown("#### Revisiones pendientes")
     if pendientes.empty:
         if reporte["errores"] or archivos_leidos == 0:
-            st.warning("No hay resultados suficientes. Revisa los archivos que no se pudieron leer.")
+            st.warning(
+                "No hay resultados suficientes. Revisa los archivos que no se pudieron leer."
+            )
         elif modo_avanzado:
-            st.success("No se detectaron diferencias en la revisión avanzada.")
+            st.info(
+                "Sin observaciones en las revisiones seleccionadas. "
+                "Esto no equivale a certificación oficial de pago."
+            )
         else:
-            st.info("La revisión rápida identifica pagos; la cuadratura detallada es opcional.")
+            st.info(
+                "La lectura prioriza estado de pago, fecha y período. "
+                "La revisión de nóminas es opcional."
+            )
     else:
         columnas = {
             "archivo": "Archivo",
@@ -357,14 +365,41 @@ elif reporte:
             "hallazgo": "Qué revisar",
             "accion_recomendada": "Qué hacer",
         }
-        tabla = pendientes.reindex(columns=list(columnas)).rename(columns=columnas)
-        st.dataframe(
-            tabla, hide_index=True, use_container_width=True,
-            column_config={
-                "Qué revisar": st.column_config.TextColumn("Qué revisar", width="large"),
-                "Qué hacer": st.column_config.TextColumn("Qué hacer", width="large"),
-            },
-        )
+        categorias_avanzadas = {
+            "Cotizaciones", "Cobertura OCR (avanzado)",
+            "Cruce F30-1/Previred",
+        }
+        es_avanzado = pendientes["categoria"].isin(categorias_avanzadas)
+        avisos_pago = pendientes.loc[~es_avanzado]
+        avisos_avanzados = pendientes.loc[es_avanzado]
+
+        if not avisos_pago.empty:
+            st.markdown("**Documentos y acreditación de pago**")
+            st.dataframe(
+                avisos_pago.reindex(columns=list(columnas)).rename(columns=columnas),
+                hide_index=True, use_container_width=True,
+            )
+        if not avisos_avanzados.empty:
+            with st.expander(
+                f"Auditoría avanzada de nóminas, bases y OCR ({len(avisos_avanzados)} observaciones)",
+                expanded=False,
+            ):
+                st.info(
+                    "Estas observaciones son de lectura o cuadratura de nóminas. "
+                    "No indican por sí solas que las cotizaciones estén impagas. "
+                    "Revisar por separado los comprobantes de pago."
+                )
+                st.dataframe(
+                    avisos_avanzados.reindex(columns=list(columnas)).rename(
+                        columns=columnas
+                    ),
+                    hide_index=True, use_container_width=True,
+                )
+        if avisos_pago.empty:
+            st.caption(
+                "No hay observaciones adicionales de documentos o pago en esta bandeja. "
+                "Revisa también el estado de los comprobantes en la tabla superior."
+            )
 
     if reporte.get("reporte_excel"):
         st.download_button(
