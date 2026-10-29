@@ -290,6 +290,25 @@ elif reporte:
         if tiempos:
             st.dataframe(pd.DataFrame(tiempos), hide_index=True, use_container_width=True)
     st.markdown("#### Estado documental del pago de cotizaciones")
+    total_rescate = sum(
+        len(doc.get("rapidocr", {}).get("paginas", []))
+        for doc in reporte.get("pagos_documentales", [])
+    )
+    if total_rescate:
+        st.caption(
+            f"RapidOCR revisó {total_rescate} página(s) escaneada(s) "
+            "de forma complementaria a Tesseract."
+        )
+    sin_rescate = [
+        doc["archivo"] for doc in reporte.get("pagos_documentales", [])
+        if doc.get("rapidocr", {}).get("estado") == "no_disponible"
+    ]
+    if sin_rescate:
+        st.warning(
+            f"El OCR de rescate no estaba disponible en {len(sin_rescate)} "
+            "archivo(s). Se conservó la lectura original de Tesseract. "
+            "Revisar la instalación de RapidOCR/ONNX."
+        )
     filas_pago = []
     for doc_pago in reporte.get("pagos_documentales", []):
         for ev in doc_pago["comprobantes"]:
@@ -305,7 +324,10 @@ elif reporte:
             })
     if filas_pago:
         alertas_fecha = sum(
-            bool(e.get("conflicto_fecha_ocr"))
+            any(
+                k.startswith("conflicto_") and bool(v)
+                for k, v in e.items()
+            )
             for doc in reporte.get("pagos_documentales", [])
             for e in doc.get("comprobantes", [])
         )
@@ -321,8 +343,8 @@ elif reporte:
         )
         if alertas_fecha:
             st.error(
-                f"{alertas_fecha} comprobante(s) con fechas contradictorias "
-                "entre el texto OCR y el cuadro de Pago Electrónico. "
+                f"{alertas_fecha} comprobante(s) con datos OCR contradictorios "
+                "entre dos lecturas (fecha, folio, período o institución). "
                 "Revisar la página antes de aprobar el pago."
             )
         if sin_folio or sin_institucion:
