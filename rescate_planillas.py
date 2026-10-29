@@ -124,7 +124,7 @@ def rescatar_institucion_rapidocr(contenido: bytes, paginas, *, limite=3):
             try:
                 with _LOCK:
                     resultado = _motor()(np.asarray(zona.convert("RGB")))
-            except (RuntimeError, ValueError, OSError):
+            except (ImportError, RuntimeError, ValueError, OSError, TypeError):
                 continue
             textos = list(getattr(resultado, "txts", None) or [])
             if not textos:
