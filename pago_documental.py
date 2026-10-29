@@ -135,37 +135,104 @@ def _fecha_espacial(datos, ancho, alto):
                 opciones.append((distancia_y,valor))
         if opciones:
             return sorted(opciones)[0][1].replace(".","/").replace("-","/")
+    # Rescate cuando el OCR omite "Pago" pero reconoce "Electrénico".
+    tokens=[str(v).lower() for v in datos["text"]]
+    if any(v.startswith("previred") for v in tokens):
+        for j,valor in enumerate(tokens):
+            if not re.match(r"electr",valor):
+                continue
+            xx=datos["left"][j]/ancho
+            yy=datos["top"][j]/alto
+            fechas=[
+                (datos["top"][k]/alto-yy,v)
+                for k,v in enumerate(tokens)
+                if re.fullmatch(r"[0-3]?\d[/.-][01]?\d[/.-]20\d{2}",v)
+                and 0<datos["top"][k]/alto-yy<.07
+                and abs(datos["left"][k]/ancho-xx)<.08
+                and float(datos["conf"][k])>=65
+            ]
+            if fechas:
+                return sorted(fechas)[0][1].replace(".","/").replace("-","/")
     return ""
 
 def _periodo_espacial(datos, ancho, alto):
-    """MES | AÑO en casillas: anclar a PERÍODO, nunca a movimiento personal."""
+    """Lee MES y AÑO en casillas vinculadas a PERIODO y no a movimiento personal."""
     tokens=[str(x).strip() for x in datos["text"]]
     candidatos=[]
     anchors=[k for k,v in enumerate(tokens) if v.lower().startswith("period")]
     for i,year in enumerate(tokens):
-        if not re.fullmatch(r"20\d{2}",year):continue
+        if not re.fullmatch(r"20\d{2}",year):
+            continue
         year_x=datos["left"][i]/ancho
         year_y=datos["top"][i]/alto
-        for j,month in enumerate(tokens):
-            if not re.fullmatch(r"(?:0?[1-9]|1[0-2])",month):continue
-            if min(float(datos["conf"][i]),float(datos["conf"][j]))<35:continue
-            month_x=datos["left"][j]/ancho
-            month_y=datos["top"][j]/alto
-            if not (-.13<month_x-year_x<0 and abs(month_y-year_y)<.015):
+        for j,mes in enumerate(tokens):
+            if not re.fullmatch(r"(?:0?[1-9]|1[0-2])",mes):
                 continue
-            nearby=any(
+            if min(float(datos["conf"][i]),float(datos["conf"][j]))<35:
+                continue
+            mes_x=datos["left"][j]/ancho
+            mes_y=datos["top"][j]/alto
+            if not (-.13<mes_x-year_x<0 and abs(mes_y-year_y)<.015):
+                continue
+            cerca=any(
                 abs(datos["top"][k]/alto-year_y)<.085
-                and datos["left"][k]/ancho<=year_x+.08
+                and abs(datos["left"][k]/ancho-year_x)<.22
                 for k in anchors
             )
-            if nearby:
-                candidatos.append((0,abs(month_y-year_y),f"{year}-{int(month):02d}"))
+            if cerca:
+                candidatos.append((0,abs(mes_y-year_y),f"{year}-{int(mes):02d}"))
             elif year_y<.335:
-                candidatos.append((1,abs(month_y-year_y),f"{year}-{int(month):02d}"))
-    if not candidatos:return ""
-    prioridad=min(x[0] for x in candidatos)
-    valores={x[2] for x in candidatos if x[0]==prioridad}
+                candidatos.append((1,abs(mes_y-year_y),f"{year}-{int(mes):02d}"))
+    if not candidatos:
+        return ""
+    mejor=min(x[0] for x in candidatos)
+    valores={x[2] for x in candidatos if x[0]==mejor}
     return next(iter(valores)) if len(valores)==1 else ""
+
+
+def _periodo_recorte(img, datos):
+    """Dos OCR breves alrededor de PERIODO; soporta 'Septiombre 2026'."""
+    from PIL import ImageEnhance
+    import pytesseract
+    for i,valor in enumerate(datos["text"]):
+        if not re.match(r"(?i)^peri[o0d1l]{2,5}",str(valor)):
+            continue
+        x,y=datos["left"][i],datos["top"][i]
+        clip=(
+            max(0,int(x-img.width*.15)),
+            max(0,int(y-img.height*.035)),
+            min(img.width,int(x+img.width*.27)),
+            min(img.height,int(y+img.height*.085)),
+        )
+        if clip[2]<=clip[0] or clip[3]<=clip[1]:
+            continue
+        recorte=ImageEnhance.Contrast(img.crop(clip)).enhance(1.5)
+        try:
+            texto=pytesseract.image_to_string(
+                recorte,lang="eng",config="--psm 6",timeout=4
+            )
+        except (RuntimeError,OSError):
+            continue
+        periodo=_periodo(texto)
+        if periodo:
+            return periodo
+        try:
+            texto=pytesseract.image_to_string(
+                recorte,lang="eng",config="--psm 11",timeout=4
+            )
+        except (RuntimeError,OSError):
+            continue
+        periodo=_periodo(texto)
+        if periodo:
+            return periodo
+        if not re.search(r"(?i)peri[o0d1l]{2,5}",texto):
+            continue
+        limpio=_flat(texto)
+        for candidato,year in re.findall(r"\b([a-z]{4,12})\s+(20\d{2})\b",limpio):
+            for mes,num in MESES.items():
+                if len(candidato)==len(mes) and sum(a!=b for a,b in zip(candidato,mes))<=1:
+                    return f"{year}-{num:02d}"
+    return ""
 
 
 def _ocr_portada(pagina, orientacion_previa=None):
@@ -197,6 +264,8 @@ def _ocr_portada(pagina, orientacion_previa=None):
         texto="\n".join(" ".join(linea) for linea in lineas.values())
         pago=_fecha_espacial(datos,foto.width,foto.height)
         periodo=_periodo_espacial(datos,foto.width,foto.height)
+        if not periodo and not _periodo(texto):
+            periodo=_periodo_recorte(foto,datos)
         puntuacion=sum(2 for k in ("previred","pago electronico","periodo",
                                      "remuneraciones","cotizaciones")
                        if k in _flat(texto))+(3 if pago else 0)
