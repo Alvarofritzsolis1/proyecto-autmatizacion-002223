@@ -198,6 +198,16 @@ def _unir(e: dict, nuevo: dict) -> None:
         e["conflicto_institucion_rapidocr"] = True
         e["estado"] = "EVIDENCIA_INSUFICIENTE"
         return
+    # Falta de folio en un motor NO acredita que ambos estén leyendo la
+    # misma institución. Se conservan datos como candidatos, pero se fuerza
+    # revisión en pantalla y nunca aprobación documental automática.
+    if (a and not b) or (b and not a):
+        e["rapidocr_folio_no_corrobado"] = True
+        e["estado"] = "EVIDENCIA_INSUFICIENTE"
+        e["observacion"] = (
+            str(e.get("observacion", ""))
+            + " | No se pudo corroborar el folio entre ambos OCR."
+        ).strip(" |")
     for campo in ("folio", "institucion", "periodo", "fecha_pago"):
         valor = nuevo.get(campo, "")
         actual = e.get(campo, "")
