@@ -23,8 +23,10 @@ from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 from fonasa_runtime import extraer_fonasa_con_contrato, estado_lector_fonasa
 from fonasa_validacion import comprobar_traza_dias
+from nomina_salud import construir_nomina_salud
+from reporte_nomina_excel import generar_excel_nomina
 
-VERSION = "18.8-Fonasa-runtime-verificado"
+VERSION = "19.0-Nomina-Salud-Excel"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -204,7 +206,8 @@ if st.button(
             # Primero páginas asociadas al comprobante, no todas las páginas.
             paginas = [
                 e.get("pagina") for e in resultado.get("comprobantes", [])
-                if "fonasa" in str(e.get("institucion", "")).lower()
+                if str(e.get("institucion", "")).lower() == "fonasa"
+                or str(e.get("institucion", "")).lower().startswith("isapre")
             ]
             if not paginas:
                 # Anexos suelen seguir a la carátula; búsqueda acotada.
@@ -279,6 +282,11 @@ if st.button(
                         "archivo": nombre,
                         "pagina_fonasa": anexo["pagina"],
                         "rotacion_fonasa": anexo.get("rotacion"),
+                        "institucion_salud": anexo.get(
+                            "institucion_salud",
+                            fila.get("institucion_salud",
+                                     "Salud (institución por confirmar)")
+                        ),
                     })
             tiempos_pagos.append({
                 "Archivo": nombre,
@@ -333,6 +341,11 @@ if st.button(
             )
         except Exception:
             reporte_excel = None  # No perder la auditoría si el exportador falla.
+    # Consolidar una sola nómina de trabajadores de FONASA E ISAPRES.
+    # Solo asociar un pago con una planilla de la misma institución de salud.
+    nomina_unificada, alertas_salud = construir_nomina_salud(
+        pagos_documentales, nominas_fonasa
+    )
     st.session_state["reporte_galant"] = {
         "firma": firma, "engine_release": VERSION,
         "certificados": certificados,
@@ -343,6 +356,8 @@ if st.button(
         "duplicados": duplicados, "errores": errores,
         "pagos_documentales": pagos_documentales,
         "nominas_fonasa": nominas_fonasa,
+        "nomina_unificada": nomina_unificada,
+        "alertas_salud": alertas_salud,
         "entorno": {
             "release": VERSION,
             "codigo_lector_sha256_16": _huella_motor(),
@@ -412,50 +427,59 @@ elif reporte:
         tiempos = reporte.get("tiempos_pagos", [])
         if tiempos:
             st.dataframe(pd.DataFrame(tiempos), hide_index=True, use_container_width=True)
-    st.markdown("#### Trabajadores declarados en Fonasa")
+    st.markdown("#### Trabajadores y días cotizados")
     st.caption(
-        "Nómina simplificada del anexo Fonasa: trabajador, RUT, días "
-        "trabajados y período. No se realizan cuadrados de bases imponibles."
+        "Incluye planillas de Fonasa e Isapres. Se informa el número de días "
+        "declarados y el respaldo de pago correspondiente a la MISMA institución. "
+        "No se realizan cuadraturas obligatorias de montos."
     )
-    filas_fonasa = []
-    for trabajador in reporte.get("nominas_fonasa", []):
-        archivo = trabajador.get("archivo", "")
-        periodo = ""
-        fecha_pago = ""
-        folio = ""
-        estado_celda = comprobar_traza_dias(trabajador)
-        for recibo in reporte.get("pagos_documentales", []):
-            if recibo.get("archivo") != archivo:
-                continue
-            candidatos = [
-                x for x in recibo.get("comprobantes", [])
-                if "fonasa" in str(x.get("institucion", "")).lower()
-            ]
-            if candidatos:
-                periodos = {x.get("periodo") for x in candidatos if x.get("periodo")}
-                fechas = {x.get("fecha_pago") for x in candidatos if x.get("fecha_pago")}
-                folios = {x.get("folio") for x in candidatos if x.get("folio")}
-                periodo = next(iter(periodos)) if len(periodos) == 1 else "Revisar"
-                fecha_pago = next(iter(fechas)) if len(fechas) == 1 else "Revisar"
-                folio = next(iter(folios)) if len(folios) == 1 else "Revisar"
-            break
-        filas_fonasa.append({
-            "Archivo": archivo,
-            "Nombre trabajador": trabajador.get("trabajador_nombre", ""),
-            "RUT": trabajador.get("trabajador_rut", ""),
-            "Días trabajados": estado_celda["valor_confiable"],
-            "Estado OCR días": estado_celda["estado"],
-            "Método de lectura": trabajador.get("metodo_dias", "Sin traza"),
-            "Período": periodo or "Por confirmar",
-            "Fecha pago Fonasa": fecha_pago or "Por confirmar",
-            "Folio Fonasa": folio or "Por confirmar",
-            "Página anexo": trabajador.get("pagina_fonasa", ""),
-            "Observación": (
-                "Revisar días en anexo (OCR ambiguo)"
-                if trabajador.get("dias_requieren_revision")
-                else estado_celda["observacion"]
+    registros_salud = reporte.get("nomina_unificada", [])
+    filas_fonasa = [
+        {
+            "Archivo": reg.get("archivo", ""),
+            "Nombre trabajador": reg.get("nombre", ""),
+            "RUT": reg.get("rut", ""),
+            "Sistema salud": reg.get("sistema", "Por verificar"),
+            "Institución": reg.get("institucion_salud", ""),
+            "Días trabajados": reg.get("dias"),
+            "Período": reg.get("periodo") or "Por confirmar",
+            "Fecha de pago": reg.get("fecha_pago") or "Por confirmar",
+            "Folio": reg.get("folio") or "Por confirmar",
+            "Situación": reg.get("situacion", "Revisar"),
+            "Página planilla": reg.get("pagina_planilla"),
+            "Método OCR": reg.get("metodo_lectura", ""),
+            "Observación": reg.get("observacion", ""),
+        }
+        for reg in registros_salud
+    ]
+    if reporte.get("alertas_salud"):
+        st.warning(
+            "Hay comprobantes de Isapre cuya nómina no pudo identificarse "
+            "con seguridad. Consulta las observaciones del archivo Excel: "
+            "no se deben omitir silenciosamente estos trabajadores."
+        )
+    if filas_fonasa:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Trabajadores y períodos", len(filas_fonasa))
+        c2.metric(
+            "Con días identificados",
+            sum(x["Días trabajados"] is not None for x in filas_fonasa)
+        )
+        c3.metric(
+            "Respaldo documental de pago",
+            sum(x["Situación"] == "Pago respaldado en PDF"
+                for x in filas_fonasa)
+        )
+        st.download_button(
+            "Descargar Excel de trabajadores y días cotizados",
+            data=generar_excel_nomina(
+                registros_salud, reporte.get("alertas_salud", [])
             ),
-        })
+            file_name="GALANT_Trabajadores_Dias_Cotizados.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True,
+        )
     if filas_fonasa:
         cantidad_sin_traza = sum(
             x["Estado OCR días"] == "SIN_TRAZA" for x in filas_fonasa
@@ -478,9 +502,9 @@ elif reporte:
             tabla_fonasa, hide_index=True, use_container_width=True
         )
         st.download_button(
-            "Descargar lectura OCR original de Fonasa (CSV)",
+            "Descargar lectura OCR de salud (CSV)",
             data=tabla_fonasa.to_csv(index=False).encode("utf-8-sig"),
-            file_name="GALANT_Fonasa_lectura_original.csv",
+            file_name="GALANT_Nomina_Salud_lectura_original.csv",
             mime="text/csv",
         )
         # Las correcciones humanas tienen su propio editor y exportación.
@@ -523,10 +547,10 @@ elif reporte:
             st.download_button(
                 "Descargar nómina con correcciones manuales (CSV)",
                 data=tabla_editada.to_csv(index=False).encode("utf-8-sig"),
-                file_name="GALANT_Fonasa_corregida_manualmente.csv",
+                file_name="GALANT_Nomina_Salud_correcciones_manuales.csv",
                 mime="text/csv",
             )
-        with st.expander("Diagnóstico verificable del OCR de Fonasa", expanded=False):
+        with st.expander("Diagnóstico verificable del OCR de salud", expanded=False):
             st.warning(
                 "El diagnóstico puede contener RUT y nombres de trabajadores. "
                 "No lo compartas públicamente."
@@ -599,7 +623,7 @@ elif reporte:
                     paquete, ensure_ascii=False, indent=2,
                     default=str
                 ).encode("utf-8"),
-                file_name="GALANT_Diagnostico_Fonasa_Privado.json",
+                file_name="GALANT_Diagnostico_Salud_Privado.json",
                 mime="application/json",
             )
             if trazas:
@@ -676,102 +700,6 @@ elif reporte:
             "No se pudo localizar una nómina Fonasa confiable en los documentos. "
             "La lectura de comprobantes de pago se muestra por separado."
         )
-    st.markdown("#### Estado documental del pago de cotizaciones")
-    total_rescate = sum(
-        len(doc.get("rapidocr", {}).get("paginas", []))
-        for doc in reporte.get("pagos_documentales", [])
-    )
-    if total_rescate:
-        st.caption(
-            f"RapidOCR revisó {total_rescate} página(s) escaneada(s) "
-            "de forma complementaria a Tesseract."
-        )
-    sin_rescate = [
-        doc["archivo"] for doc in reporte.get("pagos_documentales", [])
-        if doc.get("rapidocr", {}).get("estado") == "no_disponible"
-    ]
-    if sin_rescate:
-        st.warning(
-            f"El OCR de rescate no estaba disponible en {len(sin_rescate)} "
-            "archivo(s). Se conservó la lectura original de Tesseract. "
-            "Revisar la instalación de RapidOCR/ONNX."
-        )
-    filas_pago = []
-    for doc_pago in reporte.get("pagos_documentales", []):
-        for ev in doc_pago["comprobantes"]:
-            filas_pago.append({
-                "Archivo": doc_pago["archivo"],
-                "Institución": ev["institucion"],
-                "Período remuneración": ev["periodo"] or "No legible",
-                "Fecha de pago": ev["fecha_pago"] or "No identificada",
-                "Estado documental": ev["estado"].replace("_", " ").capitalize(),
-                "Página": ev["pagina"],
-                "Folio": ev["folio"],
-                "Observación": ev["observacion"],
-            })
-    if filas_pago:
-        alertas_fecha = sum(
-            any(
-                k.startswith("conflicto_") and bool(v)
-                for k, v in e.items()
-            )
-            for doc in reporte.get("pagos_documentales", [])
-            for e in doc.get("comprobantes", [])
-        )
-        sin_folio = sum(
-            not bool(e.get("folio"))
-            for doc in reporte.get("pagos_documentales", [])
-            for e in doc.get("comprobantes", [])
-        )
-        sin_institucion = sum(
-            "no identificada" in str(e.get("institucion", "")).lower()
-            for doc in reporte.get("pagos_documentales", [])
-            for e in doc.get("comprobantes", [])
-        )
-        if alertas_fecha:
-            st.error(
-                f"{alertas_fecha} comprobante(s) con datos OCR contradictorios "
-                "entre dos lecturas (fecha, folio, período o institución). "
-                "Revisar la página antes de aprobar el pago."
-            )
-        if sin_folio or sin_institucion:
-            st.warning(
-                f"Identificación parcial: {sin_folio} comprobante(s) sin folio "
-                f"y {sin_institucion} sin institución identificada. "
-                "Aunque exista fecha de pago, confirmar el respaldo antes de aprobar."
-            )
-        completos = sum(
-            bool(e.get("periodo") and e.get("fecha_pago"))
-            for doc in reporte.get("pagos_documentales", [])
-            for e in doc.get("comprobantes", [])
-        )
-        st.caption(
-            f"Comprobantes con fecha y período: {completos} de {len(filas_pago)}. "
-            "Los restantes requieren revisión; no se clasifican como impagos."
-        )
-        tabla_pago = pd.DataFrame(filas_pago)
-        st.dataframe(tabla_pago, hide_index=True, use_container_width=True)
-        st.download_button(
-            "Descargar respaldo de pagos (CSV compatible con Excel)",
-            data=tabla_pago.to_csv(index=False).encode("utf-8-sig"),
-            file_name="GALANT_Respaldo_Pagos.csv",
-            mime="text/csv",
-        )
-        incompletos = [
-            x for x in reporte["pagos_documentales"] if not x["revision_integral"]
-        ]
-        if incompletos:
-            st.warning(
-                "Algunos PDF son escaneados y la lectura rápida revisa páginas "
-                "prioritarias. Los pagos mostrados tienen evidencia documental, "
-                "pero aún pueden faltar instituciones o períodos por leer."
-            )
-    else:
-        st.info("Sin comprobantes de pago suficientes. Esto no significa que las cotizaciones estén impagas.")
-    st.caption(
-        "El estado proviene de los documentos: no equivale a confirmación "
-        "oficial de Previred ni de la institución recaudadora."
-    )
     st.markdown("#### Revisiones pendientes")
     if pendientes.empty:
         if reporte["errores"] or archivos_leidos == 0:
@@ -785,8 +713,8 @@ elif reporte:
             )
         else:
             st.info(
-                "La lectura prioriza estado de pago, fecha y período. "
-                "La revisión de nóminas es opcional."
+                "La revisión principal muestra días cotizados y respaldo "
+                "por trabajador; el análisis de montos es opcional."
             )
     else:
         columnas = {
