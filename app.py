@@ -240,7 +240,7 @@ if st.button(
             (i, data, nombre) for i, (data, nombre) in enumerate(previred)
             if nombre.lower().endswith(".pdf")
         ]
-        with ThreadPoolExecutor(max_workers=min(3, max(1, len(pdfs_pago)))) as grupo:
+        with ThreadPoolExecutor(max_workers=min(2, max(1, len(pdfs_pago)))) as grupo:
             trabajos = {}
             for i, data, nombre in pdfs_pago:
                 clave_cache = (
@@ -457,6 +457,7 @@ elif reporte:
             "Folio": reg.get("folio") or "Por confirmar",
             "Situación": reg.get("situacion", "Revisar"),
             "Página planilla": reg.get("pagina_planilla"),
+            "Estado OCR días": reg.get("metodo_lectura", "Sin traza"),
             "Método OCR": reg.get("metodo_lectura", ""),
             "Observación": reg.get("observacion", ""),
         }
@@ -464,8 +465,8 @@ elif reporte:
     ]
     if reporte.get("alertas_salud"):
         st.warning(
-            "Hay comprobantes de Isapre cuya nómina no pudo identificarse "
-            "con seguridad. Consulta las observaciones del archivo Excel: "
+            "Hay documentos o instituciones de salud cuya nómina no pudo "
+            "identificarse con seguridad. Consulta la hoja Revisar del Excel: "
             "no se deben omitir silenciosamente estos trabajadores."
         )
     if filas_fonasa:
@@ -707,8 +708,9 @@ elif reporte:
             )
     else:
         st.info(
-            "No se pudo localizar una nómina Fonasa confiable en los documentos. "
-            "La lectura de comprobantes de pago se muestra por separado."
+            "No se pudo recuperar una nómina de trabajadores de Fonasa o Isapre. "
+            "Revisa la calidad del documento y los avisos anteriores; "
+            "esto no significa que las cotizaciones estén impagas."
         )
     st.markdown("#### Revisiones pendientes")
     if pendientes.empty:
@@ -766,7 +768,7 @@ elif reporte:
         if avisos_pago.empty:
             st.caption(
                 "No hay observaciones adicionales de documentos o pago en esta bandeja. "
-                "Revisa también el estado de los comprobantes en la tabla superior."
+                "Comprueba la situación y respaldo por trabajador en la nómina superior."
             )
 
     if reporte.get("reporte_excel"):
