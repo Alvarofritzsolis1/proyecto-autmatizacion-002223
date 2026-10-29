@@ -357,13 +357,15 @@ def _es_anexo_fonasa(pagina, orientacion):
     return _tipo_salud(_cabecera_salud(pagina, orientacion))
 
 
-def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
+def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18,
+                         instituciones_candidatas=None):
     """Lee anexos de salud: Fonasa o Isapres (recibo y hoja siguiente).
 
     No hace cuadraturas ni valida pagos. Esa tarea la cumple el lector separado
     de evidencia documental; nunca inferir impago porque falta una fila.
     """
     salida = []
+    instituciones_candidatas = dict(instituciones_candidatas or {})
     with fitz.open(stream=contenido, filetype="pdf") as pdf:
         indices = []
         if paginas_candidatas:
@@ -393,7 +395,18 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
                     tipo = identificado if isinstance(identificado, str) else ""
                     break
             if orientacion is None:
-                continue
+                # Algunas planillas Isapre no repiten el nombre del prestador
+                # en la hoja anexa. Si el recibo de SALUD de la página previa
+                # identifica explícitamente a la institución, se permite
+                # intentar lectura del anexo inmediatamente siguiente.
+                institucion_anterior = instituciones_candidatas.get(idx, "")
+                if not (
+                    institucion_anterior == "Fonasa"
+                    or str(institucion_anterior).startswith("Isapre")
+                ):
+                    continue
+                orientacion = opciones[0]
+                tipo = institucion_anterior
             pix = pagina.get_pixmap(
                 matrix=fitz.Matrix(3, 3),
                 colorspace=fitz.csGRAY, alpha=False
