@@ -12,7 +12,7 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 
-VERSION = "18.3"
+VERSION = "19.0-UI-preview"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -22,24 +22,141 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-st.title("GALANT")
-st.caption("Control documental de contratistas")
-st.write("Sube tus documentos y presiona **Analizar documentos**.")
-
-st.subheader("Subir archivos")
-archivos_subidos = st.file_uploader(
-    "PDF, Excel o CSV de F30-1 y cotizaciones",
-    type=["pdf", "xlsx", "xls", "csv"],
-    accept_multiple_files=True,
-    max_upload_size=25,
-    help=f"Hasta {MAX_ARCHIVOS} archivos y 60 MB en total. Los PDF escaneados usan OCR.",
+# Presentación independiente del motor de auditoría: el OCR y las reglas
+# documentales permanecen en sus módulos especializados.
+st.markdown(
+    """
+    <style>
+    [data-testid="stAppViewContainer"] {
+        background: #F5F7FC;
+    }
+    .block-container {
+        max-width: 1270px;
+        padding-top: 2.0rem;
+        padding-bottom: 4rem;
+    }
+    [data-testid="stHeader"] {
+        background: rgba(245,247,252,0.94);
+    }
+    .galant-hero {
+        padding: 2.4rem 2.6rem;
+        border-radius: 22px;
+        background: linear-gradient(120deg, #102641 0%, #184E8B 68%, #2370B7 100%);
+        color: #FFFFFF;
+        box-shadow: 0 16px 32px rgba(16,38,65,.13);
+        margin: 0 0 1.9rem 0;
+    }
+    .galant-hero .eyebrow {
+        text-transform: uppercase;
+        font-size: .82rem;
+        letter-spacing: .12em;
+        font-weight: 700;
+        color: #BBD9FE;
+        margin: 0 0 .7rem 0;
+    }
+    .galant-hero h1 {
+        font-size: clamp(1.8rem,3.3vw,2.8rem);
+        font-weight: 760;
+        letter-spacing: -.035em;
+        color: #FFFFFF !important;
+        margin: 0 0 .7rem 0;
+        line-height: 1.15;
+    }
+    .galant-hero p {
+        color: #DBEAFE;
+        font-size: 1.04rem;
+        max-width: 780px;
+        margin: 0;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {
+        border-radius: 16px;
+    }
+    div[data-testid="stFileUploader"] {
+        padding: .45rem .8rem;
+        background: #F8FAFF;
+        border: 1px solid #DFE8F5;
+        border-radius: 12px;
+    }
+    div[data-testid="stMetric"] {
+        background: #FFFFFF;
+        border: 1px solid #E3EAF4;
+        border-radius: 16px;
+        padding: 1.25rem 1.4rem;
+        box-shadow: 0 3px 15px rgba(16,38,65,.04);
+    }
+    button[kind="primary"] {
+        border-radius: 10px;
+        background: #2463D4;
+        border-color: #2463D4;
+        font-weight: 650;
+        padding: .7rem 1.2rem;
+        min-height: 2.8rem;
+    }
+    button[kind="primary"]:hover {
+        background: #174FAF;
+        border-color: #174FAF;
+    }
+    div[data-testid="stDataFrame"], div[data-testid="stExpander"] {
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    @media (max-width: 700px) {
+        .block-container { padding: 1.2rem 1rem 3rem; }
+        .galant-hero { padding: 1.5rem; border-radius: 16px; }
+        .galant-hero p { font-size: .95rem; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
-archivos = list(archivos_subidos or [])
+st.markdown(
+    """
+    <section class="galant-hero">
+      <p class="eyebrow">GALANT · Control documental de contratistas</p>
+      <h1>Tu documentación, bajo control.</h1>
+      <p>Analiza certificados F30-1 y documentos previsionales con una
+      revisión ordenada, trazable y fácil de consultar.</p>
+    </section>
+    """,
+    unsafe_allow_html=True,
+)
+st.markdown("### 1. Cargar documentos")
+st.caption(
+    "Puedes subir solo cotizaciones, solo certificados F30-1 o ambos. "
+    "GALANT identifica el tipo por el contenido para evitar errores de clasificación."
+)
+col_cotizaciones, col_certificados = st.columns(2, gap="large")
+with col_cotizaciones:
+    with st.container(border=True):
+        st.markdown("#### 🧾 Cotizaciones previsionales")
+        st.caption("Comprobantes de pago, Previred y planillas de cotizaciones.")
+        cotizaciones_subidas = st.file_uploader(
+            "Subir cotizaciones (PDF, Excel o CSV)",
+            type=["pdf", "xlsx", "xls", "csv"],
+            accept_multiple_files=True,
+            max_upload_size=25,
+            key="galant_upload_cotizaciones",
+        )
+
+with col_certificados:
+    with st.container(border=True):
+        st.markdown("#### 📄 Certificados F30-1")
+        st.caption("Certificados de cumplimiento de obligaciones laborales y previsionales.")
+        certificados_subidos = st.file_uploader(
+            "Subir F30-1 (PDF)",
+            type=["pdf"],
+            accept_multiple_files=True,
+            max_upload_size=25,
+            key="galant_upload_f301",
+        )
+
+archivos = list(cotizaciones_subidas or []) + list(certificados_subidos or [])
+st.caption(f"{len(archivos)} archivo(s) seleccionado(s) · Límite: {MAX_ARCHIVOS} archivos / 60 MB.")
 limite_excedido = len(archivos) > MAX_ARCHIVOS or sum(a.size for a in archivos) > MAX_BYTES_TOTAL
 if limite_excedido:
     st.error("Se excedió el máximo de 20 archivos o 60 MB. Divide la carga.")
 
-with st.expander("Configuración opcional", expanded=False):
+with st.expander("⚙️ Configuración avanzada · opcional", expanded=False):
     a, b = st.columns(2)
     with a:
         tolerancia = st.number_input(
@@ -149,7 +266,8 @@ reporte = st.session_state.get("reporte_galant")
 if reporte and (not archivos or reporte["firma"] != _firma_actual()):
     st.info("Cambiaste los archivos. Presiona «Analizar documentos» para actualizar.")
 elif reporte:
-    st.subheader("Resultado")
+    st.markdown("### 2. Resultados del análisis")
+    st.caption("Resultados basados en los documentos cargados: no equivalen a verificación oficial de pago.")
     matriz = reporte["matriz"]
     certificados = reporte["certificados"]
     pendientes = reporte["bandeja"]
@@ -182,7 +300,7 @@ elif reporte:
     if reporte["duplicados"]:
         st.info("Se omitieron archivos repetidos para evitar contar dos veces.")
 
-    st.markdown("**Qué revisar**")
+    st.markdown("#### Observaciones y acciones recomendadas")
     if pendientes.empty:
         if reporte["errores"] or archivos_leidos == 0:
             st.warning("No hay resultados suficientes. Revisa los archivos que no se pudieron leer.")
@@ -213,9 +331,9 @@ elif reporte:
             type="primary",
         )
 
-    with st.expander("Ver documentos y trabajadores"):
+    with st.expander("📁 Explorar documentos y trabajadores", expanded=True):
         if not matriz.empty:
-            st.markdown("**Cotizaciones**")
+            st.markdown("#### 🧾 Cotizaciones previsionales")
             columnas_cot = {
                 "trabajador_nombre": "Trabajador",
                 "trabajador_rut": "RUT",
@@ -232,7 +350,7 @@ elif reporte:
                 hide_index=True, use_container_width=True,
             )
         if certificados:
-            st.markdown("**Certificados F30-1**")
+            st.markdown("#### 📄 Certificados F30-1")
             filas_f301 = []
             for cert in certificados:
                 declarados = cert.get("trabajadores_declarados")
@@ -256,7 +374,7 @@ elif reporte:
             )
         resumen_cruce = reporte["cruce_resumen"]
         if resumen_cruce is not None and not resumen_cruce.empty:
-            st.markdown("**Comparación F30-1 y cotizaciones**")
+            st.markdown("#### 🔎 Comparación documental")
             columnas_cruce = {
                 "contratista": "Empresa",
                 "periodo": "Período",
