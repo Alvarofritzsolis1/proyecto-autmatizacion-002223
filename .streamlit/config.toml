@@ -1,0 +1,13 @@
+# La configuración de Streamlit debe estar en .streamlit/config.toml.
+# El config.toml del directorio raíz no aplica automáticamente en Streamlit Cloud.
+[theme]
+base = "light"
+primaryColor = "#2463D4"
+backgroundColor = "#F5F7FC"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#172B45"
+font = "sans serif"
+
+[server]
+headless = true
+maxUploadSize = 25
