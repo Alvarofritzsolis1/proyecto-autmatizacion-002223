@@ -66,7 +66,11 @@ def _folio(texto):
 
 def _interpretar(texto,pagina,fuente):
     t=_flat(texto)
-    if not ("previred" in t and any(k in t for k in ("cotizaciones","pago electronico","monto pagado"))):
+    # OCR imperfecto: 'electrénico' y el folio siguen siendo evidencia del formato.
+    # Requerir dos anclas independientes; no inferir pago sin fecha concreta.
+    hay_formato=any(k in t for k in ("cotizaciones","pago elec","monto pagado","periodo de remuneracion"))
+    hay_origen=any(k in t for k in ("previred","numero de folio","ngmero de folio"))
+    if not (hay_formato and hay_origen):
         return None
     fecha=_fecha_pago(texto)
     periodo=_periodo(texto)
@@ -177,6 +181,30 @@ def _ocr_portada(pagina, orientacion_previa=None):
             break
     return texto_mejor,rotacion_mejor,pago_mejor,periodo_mejor
 
+def _ocr_detalle_cabecera(pagina, orientacion=None):
+    """OCR en solo el 38 % superior de un detalle: no escanea nóminas."""
+    from PIL import Image
+    import pytesseract
+    pix=pagina.get_pixmap(matrix=fitz.Matrix(1.9,1.9),colorspace=fitz.csGRAY,alpha=False)
+    img=Image.frombytes("L",(pix.width,pix.height),pix.samples)
+    giros=([orientacion] if orientacion is not None else [])
+    giros+=([90,270] if img.height>img.width else [0,180])
+    mejor,puntaje="",-1
+    for giro in dict.fromkeys(giros):
+        foto=img.rotate(giro,expand=True) if giro else img
+        cab=foto.crop((0,0,foto.width,int(foto.height*.38)))
+        try:
+            texto=pytesseract.image_to_string(
+                cab,lang="eng",config="--oem 1 --psm 11",timeout=5)
+        except (RuntimeError,OSError):
+            continue
+        punt=sum(3 for k in ("periodo","remuneraciones","pago electr","previred")
+                 if k in _flat(texto))
+        if punt>puntaje:mejor,puntaje=texto,punt
+        if punt>=9:break
+    return mejor
+
+
 def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
     """Devuelve evidencias por folio; procesamiento parcial explícito.
     Escaneos: analizar prioritariamente páginas impares (portadas).
@@ -208,6 +236,47 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
                     e["estado"]=("PAGO_POSTERIOR_DOCUMENTADO_REVISAR"
                                   if titulo_no_pago else "PAGO_RESPALDADO_EN_DOCUMENTO")
                 evidencias.append(e)
+        # Una compilación puede comenzar con DETALLE: no siempre hay portadas impares.
+        # Rescate acotado, solo si faltan comprobantes y hay presupuesto OCR.
+        if paginas_imagen and len(evidencias)<3 and paginas_ocr<max_paginas_ocr:
+            for indice,pagina in enumerate(pdf):
+                if indice%2==0 or pagina.get_text("text").strip() or paginas_ocr>=max_paginas_ocr:
+                    continue
+                paginas_ocr+=1
+                texto,_,fecha_visual,periodo_visual=_ocr_portada(pagina,orientacion)
+                ev=_interpretar(texto,indice+1,"OCR")
+                if not ev:continue
+                if periodo_visual and not ev["periodo"]:ev["periodo"]=periodo_visual
+                if fecha_visual and not ev["fecha_pago"]:
+                    ev["fecha_pago"]=fecha_visual
+                    ev["estado"]="PAGO_RESPALDADO_EN_DOCUMENTO"
+                evidencias.append(ev)
+                if len(evidencias)>=3:break
+        # Rescate opcional de fecha/período desde la página de detalle.
+        # Una hoja adyacente puede ser OTRA institución: exigir mismo folio.
+        for ev in evidencias:
+            if ev["fuente"]!="OCR" or not ev["folio"] or (
+                ev["fecha_pago"] and ev["periodo"] and
+                not ev["institucion"].startswith("Institución")
+            ):
+                continue
+            i=ev["pagina"]
+            if i>=len(pdf) or i%2!=1 or pdf[i].get_text("text").strip():
+                continue
+            texto_det=_ocr_detalle_cabecera(pdf[i])
+            folio_det=_folio(texto_det)
+            if not folio_det or folio_det!=ev["folio"]:
+                continue
+            periodo_det=_periodo(texto_det)
+            if periodo_det and not ev["periodo"]:ev["periodo"]=periodo_det
+            fecha_det=_fecha_pago(texto_det)
+            if (fecha_det and not ev["fecha_pago"] and
+                    ("pago elec" in _flat(texto_det) or "fecha pago" in _flat(texto_det))):
+                ev["fecha_pago"]=fecha_det
+                ev["estado"]="PAGO_RESPALDADO_EN_DOCUMENTO"
+            if ev["institucion"].startswith("Institución"):
+                instituto=_institucion(texto_det)
+                if not instituto.startswith("Institución"):ev["institucion"]=instituto
         # Una página de resumen y su detalle pueden compartir folio.
         por_folio=OrderedDict()
         for e in evidencias:
@@ -218,4 +287,5 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
             "paginas_texto_digital":texto_digital,"paginas_imagen":paginas_imagen,
             "paginas_ocr":paginas_ocr,
             "revision_integral":paginas_imagen==0,
+            "cobertura":"COMPLETA_TEXTO" if paginas_imagen==0 else "OCR_PARCIAL",
             "comprobantes":list(por_folio.values())}
