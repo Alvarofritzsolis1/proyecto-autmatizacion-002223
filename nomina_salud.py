@@ -130,9 +130,15 @@ def construir_nomina_salud(pagos_documentales, trabajadores_anexos):
             "pagina_comprobante": pagina_doc,
             "estado_documento": (recibo or {}).get("estado", ""),
             "observacion": motivo or verificacion.get("observacion", ""),
-            "conflictos": any(
-                str(k).startswith("conflicto_") and bool(v)
-                for k, v in (recibo or {}).items()
+            "conflictos": (
+                any(
+                    str(k).startswith("conflicto_") and bool(v)
+                    for k, v in (recibo or {}).items()
+                )
+                or "no identificada" in str(inst).lower()
+                or "no identificada" in str(
+                    (recibo or {}).get("institucion", "")
+                ).lower()
             ),
         })
 
@@ -160,21 +166,38 @@ def construir_nomina_salud(pagos_documentales, trabajadores_anexos):
 
     # Alertar cuando existen planillas de Isapre sin anexo de trabajadores
     # identificable. El silencio no equivale a cobertura completa.
-    archivos_registrados = {
-        r["archivo"] for r in resultados
-        if r["sistema"] == "Isapre"
-    }
     for doc in pagos_documentales:
-        if doc.get("archivo") in archivos_registrados:
-            continue
-        if any(
-            str(e.get("institucion", "")).startswith("Isapre")
-            for e in doc.get("comprobantes", [])
-        ):
+        archivo = doc.get("archivo")
+        recibos_isapre = [
+            e for e in doc.get("comprobantes", [])
+            if str(e.get("institucion", "")).startswith("Isapre")
+        ]
+        for recibo in recibos_isapre:
+            if any(
+                r["archivo"] == archivo
+                and r["sistema"] == "Isapre"
+                and _compatibles(
+                    r["institucion_salud"], recibo.get("institucion")
+                )
+                for r in resultados
+            ):
+                continue
             alertas.append({
-                "archivo": doc.get("archivo"),
-                "detalle": "Se identificó comprobante Isapre, pero no "
-                           "se recuperó una nómina Isapre: revisar anexo.",
+                "archivo": archivo,
+                "detalle": (
+                    "Comprobante " + str(recibo.get("institucion", "Isapre"))
+                    + " en pág. " + str(recibo.get("pagina", "?"))
+                    + " sin nómina de afiliados identificada."
+                ),
+            })
+        if doc.get("comprobantes") and not any(
+            r["archivo"] == archivo for r in resultados
+        ) and not recibos_isapre:
+            alertas.append({
+                "archivo": archivo,
+                "detalle": "Se identificaron comprobantes, pero no fue "
+                           "posible recuperar una nómina de salud Fonasa "
+                           "o Isapre con trabajadores.",
             })
     return sorted(
         resultados, key=lambda r: (
