@@ -89,3 +89,47 @@ def buscar_paginas_con_planilla(contenido: bytes, *, max_paginas=24):
         candidatas,
         key=lambda x: (-x["filas"], -x["columnas"], x["pagina"])
     )
+
+
+def rescatar_institucion_rapidocr(contenido: bytes, paginas, *, limite=3):
+    """Segundo OCR de IA local, solo para ENCABEZADOS de páginas candidatas.
+
+    Reutiliza el modelo ONNX instalado para los recibos; no conecta con API.
+    Devuelve {indice_0_based_de_planilla: institución} cuando reconoce
+    claramente la institución. Las pistas nunca certifican que haya pago.
+    """
+    try:
+        from rapidocr_pago import _motor, _LOCK
+        from fonasa_nomina_simple import _tipo_salud
+        from PIL import Image
+    except ImportError:
+        return {}
+    encontrados = {}
+    with fitz.open(stream=contenido, filetype="pdf") as pdf:
+        for numero in list(paginas)[:limite]:
+            idx = int(numero) - 1
+            if not 0 <= idx < len(pdf):
+                continue
+            pagina = pdf[idx]
+            pix = pagina.get_pixmap(
+                matrix=fitz.Matrix(1.5, 1.5),
+                colorspace=fitz.csGRAY, alpha=False,
+            )
+            im = Image.frombytes(
+                "L", (pix.width, pix.height), pix.samples
+            )
+            if pix.height > pix.width:
+                im = im.rotate(90, expand=True)
+            zona = im.crop((0, 0, im.width, int(im.height * .31)))
+            try:
+                with _LOCK:
+                    resultado = _motor()(np.asarray(zona.convert("RGB")))
+            except (RuntimeError, ValueError, OSError):
+                continue
+            textos = list(getattr(resultado, "txts", None) or [])
+            if not textos:
+                continue
+            tipo = _tipo_salud(" ".join(str(x) for x in textos))
+            if tipo == "Fonasa" or tipo.startswith("Isapre"):
+                encontrados[idx] = tipo
+    return encontrados
