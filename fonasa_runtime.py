@@ -24,7 +24,17 @@ def _contrato_valido(modulo: Any) -> bool:
         return False
     if "diagnostico" not in inspect.signature(celda).parameters:
         return False
-    return "traza_dias" in lector.__code__.co_consts
+    # CPython suele guardar las claves de un dict en una tupla de constantes
+    # de BUILD_CONST_KEY_MAP; comparar solo cadenas sueltas daría falso.
+    constantes = lector.__code__.co_consts
+    return any(
+        constante == "traza_dias"
+        or (
+            isinstance(constante, (tuple, list))
+            and "traza_dias" in constante
+        )
+        for constante in constantes
+    )
 
 
 def cargar_lector_fonasa():
