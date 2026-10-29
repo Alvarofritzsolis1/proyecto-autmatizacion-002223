@@ -202,6 +202,7 @@ if st.button(
             certificados=certificados, incidencias=incidencias,
             detalle=detalle, log=log, cruce_detalle=cruzados,
             cruce_resumen=resumen_cruce, errores=errores, duplicados=duplicados,
+            pagos_documentales=pagos_documentales,
         )
         calidad = resumen_calidad(certificados, matriz, bandeja)
         try:
@@ -367,7 +368,7 @@ elif reporte:
         }
         categorias_avanzadas = {
             "Cotizaciones", "Cobertura OCR (avanzado)",
-            "Cruce F30-1/Previred",
+            "Cruce F30-1/Previred", "Auditoría avanzada",
         }
         es_avanzado = pendientes["categoria"].isin(categorias_avanzadas)
         avisos_pago = pendientes.loc[~es_avanzado]
