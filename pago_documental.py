@@ -68,7 +68,7 @@ def _institucion(texto):
     # Isapres. No reducir la cobertura exclusivamente a Fonasa.
     isapres = [
         ("Nueva Masvida", r"nueva\s+masvida"),
-        ("Cruz Blanca", r"cruz\s+blanca"),
+        ("Cruz Blanca", r"cruz\s*blanca"),
         ("Vida Tres", r"vida\s+tres"),
         ("Cruz del Norte", r"cruz\s+del\s+norte"),
         ("Colmena", r"\bcolmena\b"),
