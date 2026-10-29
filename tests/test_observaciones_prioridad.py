@@ -56,3 +56,35 @@ def test_keep_individual_issue_and_group_scan_warning():
     ]))
     assert len(b)==2
     assert set(b["categoria"])=={"Cotizaciones","Cobertura OCR (avanzado)"}
+
+
+def test_payment_evidence_survives_advanced_payroll_failure():
+    logs=pd.DataFrame([
+        {"archivo":"sintetico.pdf", "resultado":"ERROR",
+         "detalle":"No se encontraron filas de trabajadores confiables"}
+    ])
+    pagos=[{
+        "archivo":"sintetico.pdf",
+        "comprobantes":[{
+            "periodo":"2026-09","fecha_pago":"13/10/2026",
+            "estado":"PAGO_RESPALDADO_EN_DOCUMENTO",
+        }]
+    }]
+    bandeja=generar_bandeja(log=logs,pagos_documentales=pagos)
+    assert len(bandeja)==1
+    assert bandeja.iloc[0]["categoria"]=="Auditoría avanzada"
+    assert "nómina" in bandeja.iloc[0]["hallazgo"]
+    assert "puede estar incompleto" in bandeja.iloc[0]["hallazgo"]
+
+
+def test_no_evidence_still_raises_document_warning():
+    logs=pd.DataFrame([
+        {"archivo":"sintetico.pdf","resultado":"ERROR","detalle":"PDF ilegible"}
+    ])
+    bandeja=generar_bandeja(
+        log=logs,
+        pagos_documentales=[{"archivo":"sintetico.pdf","comprobantes":[]}],
+    )
+    assert len(bandeja)==1
+    assert bandeja.iloc[0]["categoria"]=="Archivo"
+    assert bandeja.iloc[0]["prioridad"]=="ALTA"
