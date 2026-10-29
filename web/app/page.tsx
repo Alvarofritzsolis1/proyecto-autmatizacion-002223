@@ -157,7 +157,7 @@ export default function Page() {
     try {
       const { error } = await db.auth.signInWithOtp({
         email: email.trim(),
-        options: { emailRedirectTo: window.location.origin },
+        options: { emailRedirectTo: window.location.origin, shouldCreateUser: false },
       });
       setInfo(error ? "No se pudo solicitar el acceso: " + error.message : "Revisa tu correo para ingresar a GALANT.");
     } finally { setBusy(false); }
@@ -236,7 +236,7 @@ export default function Page() {
       {!initialized ? <section className="loading">Cargando sesión segura…</section> : !user ? (
         <section className="login-wrap">
           <div className="login-copy"><span className="eyebrow">Plataforma GALANT</span><h1>Documentos bajo control. <em>Sin complicaciones.</em></h1><p>Analiza cotizaciones previsionales y certificados F30-1 en un espacio privado. Organiza las fechas, los períodos y las observaciones en un solo lugar.</p><div className="trust-row"><Icon name="shield" size={19}/> Acceso personalizado y archivos no públicos</div></div>
-          <form className="login-card" onSubmit={(e) => { void signIn(e); }}><div className="small-illustration"><Icon name="file" size={24}/></div><h2>Ingresar a GALANT</h2><p>Recibirás un enlace de acceso en tu correo electrónico.</p><label htmlFor="email">Correo electrónico</label><input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="correo@empresa.cl" autoComplete="email"/><button className="primary-btn" disabled={busy}>Enviar enlace seguro</button>{info && <div className="message" role="status">{info}</div>}</form>
+          <form className="login-card" onSubmit={(e) => { void signIn(e); }}><div className="small-illustration"><Icon name="file" size={24}/></div><h2>Ingresar a GALANT</h2><p>Solo usuarios autorizados pueden ingresar. Recibirás un enlace en tu correo.</p><label htmlFor="email">Correo electrónico</label><input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="correo@empresa.cl" autoComplete="email"/><button className="primary-btn" disabled={busy}>Enviar enlace seguro</button>{info && <div className="message" role="status">{info}</div>}</form>
         </section>
       ) : (
         <>
