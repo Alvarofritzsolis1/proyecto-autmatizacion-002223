@@ -285,7 +285,7 @@ def _nomina_de_imagen(imagen, usar_ocr_alternativo=False):
                     rapid_celdas = leer_columna_dias_rapidocr(
                         imagen, filas, columnas[5], columnas[6]
                     )
-                except (ImportError, OSError, RuntimeError):
+                except (ImportError, OSError, RuntimeError, ValueError, TypeError):
                     rapid_celdas = {}
             alternativas = []
             for i, traza in zip(indices, trazas):
