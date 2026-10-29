@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import pandas as pd
 import streamlit as st
@@ -121,42 +122,66 @@ if st.button(
                 f301.append((data, nombre))
             else:
                 previred.append((data, nombre))
-        # La evidencia de pago se procesa ANTES y de manera independiente
-        # de la nómina. Un OCR de tablas fallido no descarta un recibo pagado.
-        for data, nombre in previred:
-            if not nombre.lower().endswith(".pdf"):
-                continue
-            try:
-                inicio_pdf = time.perf_counter()
-                clave_cache = VERSION + ":" + hashlib.sha256(data).hexdigest() + ":" + str(lectura_ampliada)
-                reutilizado = clave_cache in cache_sesion
-                if reutilizado:
-                    evidencia = dict(cache_sesion[clave_cache])
-                else:
-                    evidencia = analizar_pago_pdf(
-                        data, nombre, max_paginas_ocr=20 if lectura_ampliada else 6
+        # El OCR se procesa concurrentemente por PDF (nunca una misma página
+        # desde varios hilos). La memoria de sesión se consulta SOLO en el hilo
+        # principal, para evitar condiciones de carrera en Streamlit.
+        def _leer_pago_trabajo(data, nombre):
+            t = time.perf_counter()
+            resultado = analizar_pago_pdf(
+                data, nombre, max_paginas_ocr=20 if lectura_ampliada else 6
+            )
+            return resultado, time.perf_counter() - t
+
+        recibos_ordenados = {}
+        pdfs_pago = [
+            (i, data, nombre) for i, (data, nombre) in enumerate(previred)
+            if nombre.lower().endswith(".pdf")
+        ]
+        with ThreadPoolExecutor(max_workers=min(3, max(1, len(pdfs_pago)))) as grupo:
+            trabajos = {}
+            for i, data, nombre in pdfs_pago:
+                clave_cache = (
+                    VERSION + ":" + hashlib.sha256(data).hexdigest()
+                    + ":" + str(lectura_ampliada)
+                )
+                if clave_cache in cache_sesion:
+                    recibos_ordenados[i] = (
+                        dict(cache_sesion[clave_cache]), nombre, 0.0, True
                     )
+                    continue
+                futuro = grupo.submit(_leer_pago_trabajo, data, nombre)
+                trabajos[futuro] = (i, clave_cache, nombre)
+
+            for futuro in as_completed(trabajos):
+                i, clave_cache, nombre = trabajos[futuro]
+                try:
+                    evidencia, segundos = futuro.result()
                     cache_sesion[clave_cache] = dict(evidencia)
-                    # Caché privada de esta sesión; nunca guardar PDFs ni datos
-                    # personales en un caché global compartido entre usuarios.
+                    # Máximo 50 resultados en la sesión privada, sin caché global.
                     if len(cache_sesion) > 50:
                         cache_sesion.pop(next(iter(cache_sesion)))
-                evidencia["archivo"] = nombre
-                pagos_documentales.append(evidencia)
-                tiempos_pagos.append({
-                    "Archivo": nombre,
-                    "Segundos": round(time.perf_counter() - inicio_pdf, 2),
-                    "Páginas": evidencia["paginas"],
-                    "Páginas con OCR": evidencia["paginas_ocr"],
-                    "Comprobantes detectados": len(evidencia["comprobantes"]),
-                    "Comprobantes completos": sum(
-                        bool(x.get("periodo") and x.get("fecha_pago"))
-                        for x in evidencia["comprobantes"]
-                    ),
-                    "Caché": "Reutilizado" if reutilizado else "Analizado",
-                })
-            except Exception as exc:
-                errores.append("Lectura de pago: " + nombre + ": " + str(exc)[:250])
+                    recibos_ordenados[i] = (evidencia, nombre, segundos, False)
+                except Exception as exc:
+                    errores.append(
+                        "Lectura de pago: " + nombre + ": " + str(exc)[:250]
+                    )
+        for i in sorted(recibos_ordenados):
+            evidencia, nombre, segundos, reutilizado = recibos_ordenados[i]
+            evidencia = dict(evidencia)
+            evidencia["archivo"] = nombre
+            pagos_documentales.append(evidencia)
+            tiempos_pagos.append({
+                "Archivo": nombre,
+                "Segundos": round(segundos, 2),
+                "Páginas": evidencia["paginas"],
+                "Páginas con OCR": evidencia["paginas_ocr"],
+                "Comprobantes detectados": len(evidencia["comprobantes"]),
+                "Comprobantes completos": sum(
+                    bool(x.get("periodo") and x.get("fecha_pago"))
+                    for x in evidencia["comprobantes"]
+                ),
+                "Caché": "Reutilizado" if reutilizado else "Analizado",
+            })
         if f301:
             certificados, nomina, incidencias = analizar_f301(f301)
         if previred and modo_avanzado:
