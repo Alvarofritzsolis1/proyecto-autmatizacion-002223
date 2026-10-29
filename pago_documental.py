@@ -64,6 +64,24 @@ def _fecha_pago(texto):
 def _institucion(texto):
     t=_flat(texto)
     if "fonasa" in t:return "Fonasa"
+    # Los recibos de cotizaciones de salud también pueden corresponder a
+    # Isapres. No reducir la cobertura exclusivamente a Fonasa.
+    isapres = [
+        ("Nueva Masvida", r"nueva\s+masvida"),
+        ("Cruz Blanca", r"cruz\s+blanca"),
+        ("Vida Tres", r"vida\s+tres"),
+        ("Cruz del Norte", r"cruz\s+del\s+norte"),
+        ("Colmena", r"\bcolmena\b"),
+        ("Consalud", r"\bconsalud\b"),
+        ("Banmédica", r"\bbanmedica\b"),
+        ("Esencial", r"\besencial\b"),
+        ("Fundación", r"\bfundacion\b"),
+    ]
+    for nombre, patron in isapres:
+        if re.search(patron, t):
+            return "Isapre " + nombre
+    if re.search(r"\bisapre\b", t):
+        return "Isapre (no identificada)"
     if "seguro social" in t:return "Seguro Social"
     if "instituto de seguridad laboral" in t or re.search(r"\bisl\b",t):return "ISL"
     if "asociacion chilena de seguridad" in t or re.search(r"\bachs\b",t):return "ACHS"
