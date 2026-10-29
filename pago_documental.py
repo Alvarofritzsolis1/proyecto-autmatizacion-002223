@@ -300,7 +300,8 @@ def _ocr_detalle_cabecera(pagina, orientacion=None):
     return mejor
 
 
-def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
+def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6,
+                     usar_rapidocr:bool=False,max_paginas_rapidocr:int=2):
     """Devuelve evidencias por folio; procesamiento parcial explícito.
     Escaneos: analizar prioritariamente páginas impares (portadas).
     No declara el archivo completo PAGADO si no leyó sus instituciones.
@@ -393,6 +394,20 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
             if ev["institucion"].startswith("Institución"):
                 instituto=_institucion(texto_det)
                 if not instituto.startswith("Institución"):ev["institucion"]=instituto
+        # Segundo OCR LOCAL y opcional, solo si Tesseract no logró campos
+        # esenciales. No se usa en PDF digitales ni en páginas suficientes.
+        rapidocr_resumen = {"estado": "deshabilitado", "paginas": [],
+                            "errores": 0, "comprobantes_adicionales": 0}
+        if usar_rapidocr and paginas_imagen:
+            try:
+                from rapidocr_pago import rescatar
+                rapidocr_resumen = rescatar(
+                    contenido, evidencias,
+                    max_paginas=max_paginas_rapidocr,
+                )
+            except (ImportError, RuntimeError, OSError) as exc:
+                rapidocr_resumen["estado"] = "no_disponible"
+                rapidocr_resumen["errores"] = 1
         # Una página de resumen y su detalle pueden compartir folio.
         por_folio=OrderedDict()
         for e in evidencias:
@@ -404,4 +419,5 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
             "paginas_ocr":paginas_ocr,
             "revision_integral":paginas_imagen==0,
             "cobertura":"COMPLETA_TEXTO" if paginas_imagen==0 else "OCR_PARCIAL",
-            "comprobantes":list(por_folio.values())}
+            "comprobantes":list(por_folio.values()),
+            "rapidocr":rapidocr_resumen}
