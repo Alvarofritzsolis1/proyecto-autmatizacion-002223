@@ -11,6 +11,7 @@ from cruce_documental_galant import conciliar_f301_previred
 from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
+from pago_documental import analizar_pago_pdf
 
 VERSION = "18.3"
 MAX_ARCHIVOS = 20
@@ -40,6 +41,11 @@ if limite_excedido:
     st.error("Se excedió el máximo de 20 archivos o 60 MB. Divide la carga.")
 
 with st.expander("Configuración opcional", expanded=False):
+    modo_avanzado = st.checkbox(
+        "Ejecutar además la auditoría avanzada de nóminas y bases imponibles",
+        value=False,
+        help="La revisión rápida de respaldo de pago, fecha y período funciona sin extraer toda la nómina.",
+    )
     a, b = st.columns(2)
     with a:
         tolerancia = st.number_input(
@@ -74,6 +80,7 @@ def _firma_actual():
         h.update(topes_subido.getvalue())
     h.update(str(int(tolerancia)).encode())
     h.update(str(bool(incluir_mutual)).encode())
+    h.update(str(bool(modo_avanzado)).encode())
     return h.hexdigest()
 
 if st.button(
@@ -98,6 +105,7 @@ if st.button(
     matriz = pd.DataFrame(columns=COLUMNAS_SALIDA)
     excel, detalle, log = None, pd.DataFrame(), pd.DataFrame()
     errores = []
+    pagos_documentales = []
     with st.spinner("Leyendo documentos y conciliando sus respaldos..."):
         f301, previred = [], []
         for data, nombre in entradas:
@@ -105,9 +113,18 @@ if st.button(
                 f301.append((data, nombre))
             else:
                 previred.append((data, nombre))
+        # La evidencia de pago se procesa ANTES y de manera independiente
+        # de la nómina. Un OCR de tablas fallido no descarta un recibo pagado.
+        for data, nombre in previred:
+            if not nombre.lower().endswith(".pdf"):
+                continue
+            try:
+                pagos_documentales.append(analizar_pago_pdf(data, nombre))
+            except Exception as exc:
+                errores.append("Lectura de pago: " + nombre + ": " + str(exc)[:250])
         if f301:
             certificados, nomina, incidencias = analizar_f301(f301)
-        if previred:
+        if previred and modo_avanzado:
             try:
                 matriz, excel, detalle, log = ejecutar_pipeline(
                     previred,
@@ -142,6 +159,7 @@ if st.button(
         "cruce_detalle": cruzados, "cruce_resumen": resumen_cruce,
         "bandeja": bandeja, "calidad": calidad, "reporte_excel": reporte_excel,
         "duplicados": duplicados, "errores": errores,
+        "pagos_documentales": pagos_documentales,
         "duracion": time.perf_counter()-inicio,
     }
 
@@ -164,6 +182,7 @@ elif reporte:
             ruts.add(rut)
     ruts = {rut for rut in ruts if rut.lower() not in {"", "nan", "none"}}
     archivos_leidos = len(certificados)
+    archivos_leidos += sum(bool(doc["comprobantes"]) for doc in reporte.get("pagos_documentales", []))
     if reporte["log"] is not None and not reporte["log"].empty:
         archivos_leidos += int(
             reporte["log"]["resultado"].eq("PROCESADO").sum()
@@ -182,12 +201,45 @@ elif reporte:
     if reporte["duplicados"]:
         st.info("Se omitieron archivos repetidos para evitar contar dos veces.")
 
+    st.markdown("#### Estado documental del pago de cotizaciones")
+    filas_pago = []
+    for doc_pago in reporte.get("pagos_documentales", []):
+        for ev in doc_pago["comprobantes"]:
+            filas_pago.append({
+                "Archivo": doc_pago["archivo"],
+                "Institución": ev["institucion"],
+                "Período remuneración": ev["periodo"] or "No legible",
+                "Fecha de pago": ev["fecha_pago"] or "No identificada",
+                "Estado documental": ev["estado"].replace("_", " ").capitalize(),
+                "Página": ev["pagina"],
+                "Folio": ev["folio"],
+                "Observación": ev["observacion"],
+            })
+    if filas_pago:
+        st.dataframe(pd.DataFrame(filas_pago), hide_index=True, use_container_width=True)
+        incompletos = [
+            x for x in reporte["pagos_documentales"] if not x["revision_integral"]
+        ]
+        if incompletos:
+            st.warning(
+                "Algunos PDF son escaneados y la lectura rápida revisa páginas "
+                "prioritarias. Los pagos mostrados tienen evidencia documental, "
+                "pero aún pueden faltar instituciones o períodos por leer."
+            )
+    else:
+        st.info("Sin comprobantes de pago suficientes. Esto no significa que las cotizaciones estén impagas.")
+    st.caption(
+        "El estado proviene de los documentos: no equivale a confirmación "
+        "oficial de Previred ni de la institución recaudadora."
+    )
     st.markdown("**Qué revisar**")
     if pendientes.empty:
         if reporte["errores"] or archivos_leidos == 0:
             st.warning("No hay resultados suficientes. Revisa los archivos que no se pudieron leer.")
+        elif modo_avanzado:
+            st.success("No se detectaron diferencias en la revisión avanzada.")
         else:
-            st.success("No se detectaron diferencias en los documentos leídos.")
+            st.info("La revisión rápida identifica pagos; la cuadratura detallada es opcional.")
     else:
         columnas = {
             "archivo": "Archivo",
