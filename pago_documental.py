@@ -32,6 +32,12 @@ def _periodo(texto):
     for nombre,mes in MESES.items():
         m=re.search(r"\b"+nombre+r"\s+(20\d{2})\b",t)
         if m:return f"{m.group(1)}-{mes:02d}"
+    # En escaneos la etiqueta "Periodo" puede perderse aunque quede "02/2026".
+    # Solo aceptar un periodo aislado si hay exactamente un valor distinto.
+    candidatos=re.findall(r"(?<!\d)((?:0?[1-9]|1[0-2])\s*[/.-]\s*20\d{2})(?!\d)",t)
+    if len(set(candidatos))==1:
+        mes,ano=re.split(r"[/.-]",candidatos[0])
+        return f"{ano}-{int(mes):02d}"
     return ""
 
 def _fecha_pago(texto):
@@ -68,8 +74,11 @@ def _interpretar(texto,pagina,fuente):
     # Considerar la condición solo cuando aparezca en el TÍTULO del comprobante.
     declaracion_sin_pago=("comprobante de declaracion y no pago" in t or
                           "comprobante de declaracion y no de pago" in t)
-    pago_con_respaldo=bool(fecha and ("pago electronico" in t or
-        "declaracion electronica y pago" in t or "monto pagado" in t))
+    # OCR frecuentemente convierte "Electrónico" en "Electrénico".
+    # La presencia de FECHA DE PAGO en comprobante PREVIRED también es evidencia.
+    pago_con_respaldo=bool(fecha and any(
+        clave in t for clave in ("pago electr","fecha pago","monto pagado")
+    ))
     if pago_con_respaldo:
         estado=("PAGO_POSTERIOR_DOCUMENTADO_REVISAR" if declaracion_sin_pago
                 else "PAGO_RESPALDADO_EN_DOCUMENTO")
