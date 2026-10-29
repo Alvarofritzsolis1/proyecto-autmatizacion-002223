@@ -231,6 +231,7 @@ if st.button(
                     data, paginas_candidatas=paginas,
                     instituciones_candidatas=instituciones_salud,
                     diagnostico=diagnostico_lector,
+                    usar_ocr_alternativo=usar_rapidocr,
                 )
                 resultado["diagnostico_nomina"] = diagnostico_lector
             except Exception as exc:
@@ -350,24 +351,34 @@ if st.button(
                 )
             except Exception as exc:
                 errores.append("Cotizaciones/planillas: " + str(exc)[:450])
-        cruzados, resumen_cruce = conciliar_f301_previred(
-            certificados, nomina, matriz
-        )
+        if certificados or modo_avanzado:
+            cruzados, resumen_cruce = conciliar_f301_previred(
+                certificados, nomina, matriz
+            )
+        else:
+            cruzados, resumen_cruce = pd.DataFrame(), pd.DataFrame()
         bandeja = generar_bandeja(
             certificados=certificados, incidencias=incidencias,
             detalle=detalle, log=log, cruce_detalle=cruzados,
             cruce_resumen=resumen_cruce, errores=errores, duplicados=duplicados,
             pagos_documentales=pagos_documentales,
         )
-        calidad = resumen_calidad(certificados, matriz, bandeja)
-        try:
-            reporte_excel = informe_consolidado(
-                bandeja=bandeja, certificados=certificados, matriz=matriz,
-                detalle_cruce=cruzados, resumen_cruce=resumen_cruce,
-                log=log, incidencias=incidencias,
-            )
-        except Exception:
-            reporte_excel = None  # No perder la auditoría si el exportador falla.
+        calidad = (
+            resumen_calidad(certificados, matriz, bandeja)
+            if (certificados or modo_avanzado) else {}
+        )
+        # Se omite generar otro Excel costoso de conciliación cuando el
+        # usuario solo quiere la nómina de trabajadores y días cotizados.
+        reporte_excel = None
+        if certificados or modo_avanzado:
+            try:
+                reporte_excel = informe_consolidado(
+                    bandeja=bandeja, certificados=certificados, matriz=matriz,
+                    detalle_cruce=cruzados, resumen_cruce=resumen_cruce,
+                    log=log, incidencias=incidencias,
+                )
+            except Exception:
+                pass  # No perder la nómina por un fallo secundario.
     # Consolidar una sola nómina de trabajadores de FONASA E ISAPRES.
     # Solo asociar un pago con una planilla de la misma institución de salud.
     nomina_unificada, alertas_salud = construir_nomina_salud(
