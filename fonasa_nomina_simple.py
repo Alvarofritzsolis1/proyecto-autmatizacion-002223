@@ -178,13 +178,19 @@ def _nomina_de_imagen(imagen):
             )
             if dia is not None:
                 valores_dias.append(dia)
+        # Si existen dos filas con días positivos, pueden representar
+        # tramos distintos: no sumar ni escoger el máximo por suposición.
+        dias_unicos = [v for v in valores_dias if v > 0]
+        dias_confirmados = (
+            dias_unicos[0] if len(dias_unicos) == 1 else None
+        )
         salida.append({
             "trabajador_nombre": " ".join(
                 x for x in (nombre, apellido_paterno, apellido_materno) if x
             ),
             "trabajador_rut": rut,
-            "dias_trabajados_fonasa": max(valores_dias) if valores_dias else None,
-            "dias_requieren_revision": not bool(valores_dias),
+            "dias_trabajados_fonasa": dias_confirmados,
+            "dias_requieren_revision": dias_confirmados is None,
             "filas_movimientos": len(indices),
             "fuente": "Fonasa — anexo de detalle",
         })
