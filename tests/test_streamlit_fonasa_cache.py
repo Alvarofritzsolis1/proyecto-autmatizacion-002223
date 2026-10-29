@@ -48,14 +48,14 @@ def test_dias_ilegibles_no_se_muestran_como_texto_none():
 
 def test_version_nueva_identificable_en_pantalla():
     codigo = _codigo()
-    assert 'VERSION = "18.7-Fonasa-trazable"' in codigo
+    assert 'VERSION = "18.8-Fonasa-runtime-verificado"' in codigo
     assert 'f"Control documental de contratistas · {VERSION} "' in codigo
 
 
 def test_runtime_shows_real_code_and_uploaded_pdf_fingerprints():
     codigo = _codigo()
     assert "def _huella_motor():" in codigo
-    assert 'hashlib.sha256(fuente.read_bytes())' in codigo
+    assert 'estado_lector_fonasa()' in codigo
     assert 'evidencia["sha256_pdf"]' in codigo
     assert '"tesseract": _version_tesseract()' in codigo
 
@@ -73,3 +73,15 @@ def test_debug_can_render_source_cell_and_download_private_trace():
     assert "Diagnóstico verificable del OCR de Fonasa" in codigo
     assert "GALANT_Diagnostico_Fonasa_Privado.json" in codigo
     assert 'muestra = im.crop((' in codigo
+
+
+def test_usar_modulo_real_con_contrato_y_no_import_cacheado():
+    codigo = _codigo()
+    assert "from fonasa_runtime import extraer_fonasa_con_contrato" in codigo
+    assert "nomina = extraer_fonasa_con_contrato(" in codigo
+    assert '"lector_cargado": _estado_motor()' in codigo
+    assert "sha256_codigo_activo_16" in Path(
+        __file__
+    ).resolve().parents[1].joinpath("fonasa_runtime.py").read_text(
+        encoding="utf-8"
+    )
