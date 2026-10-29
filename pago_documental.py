@@ -17,7 +17,7 @@ def _flat(texto):
 def _periodo(texto):
     t=_flat(texto)
     for pat in [
-        r"(?:periodo\s*(?:de\s*)?(?:remuneraciones|cotizaciones)?|remuneracion\s*\(\s*mes)[\s:|]{0,25}"+PERIODO,
+        r"(?:periodo\s*(?:de\s*)?(?:remuneracion(?:es)?|cotizaciones)?|remuneracion\s*\(\s*mes)[\s:|]{0,25}"+PERIODO,
         r"\bperiodo\b[\s:|]{0,25}"+PERIODO,
         r"(?:periodo|remuneraciones)[\s\w:|]{0,55}?(?:0?([1-9]|1[0-2]))\s+20(\d{2})",
     ]:
