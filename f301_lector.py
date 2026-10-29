@@ -336,6 +336,49 @@ def _pago_resumen(texto: str) -> str:
     return 'NO_LEIBLE'
 
 
+def _es_previred_rapido(pagina) -> bool:
+    """Descarte rápido seguro de planillas PREVIRED antes del OCR F30-1 pesado.
+
+    Dos anclas del propio documento son necesarias. Si no hay suficientes
+    señales, NO descartar: ejecutar lector F30-1 completo.
+    """
+    texto = pagina.get_text("text", sort=True)
+    if len(texto.strip()) > 140:
+        t = sin_acentos(texto).lower()
+        return any((
+            "planilla de declaracion y pago" in t,
+            "formulario de cotizaciones previsionales" in t,
+            "detalle de pago de cotizaciones previsionales" in t,
+            "comprobante de pago de cotizaciones previsionales" in t
+        ))
+    try:
+        import pytesseract
+        from PIL import Image
+        pix = pagina.get_pixmap(
+            matrix=fitz.Matrix(1.6, 1.6),colorspace=fitz.csGRAY,alpha=False
+        )
+        imagen=Image.frombytes("L",(pix.width,pix.height),pix.samples)
+        opciones=(270,90) if imagen.height>imagen.width else (0,180)
+        for giro in opciones:
+            foto=imagen.rotate(giro,expand=True) if giro else imagen
+            text=pytesseract.image_to_string(
+                foto,lang="eng",config="--oem 1 --psm 11",timeout=6
+            )
+            t=sin_acentos(text).lower()
+            if any((
+                "planilla de declaracion y pago" in t,
+                "formulario de cotizaciones previsionales" in t,
+                "comprobante de pago de cotizaciones previsionales" in t,
+                "detalle de pago de cotizaciones previsionales" in t,
+                ("previred" in t and "folio" in t and
+                 ("periodo de remuneraciones" in t or "pago electr" in t))
+            )):
+                return True
+    except (ImportError,RuntimeError,OSError):
+        pass
+    return False
+
+
 def es_f301(data: bytes, nombre: str) -> bool:
     """Identifica F30-1 por contenido: el nombre nunca acredita el tipo."""
     if not data.startswith(b'%PDF'):
@@ -343,6 +386,8 @@ def es_f301(data: bytes, nombre: str) -> bool:
     try:
         with fitz.open(stream=data, filetype='pdf') as pdf:
             if not len(pdf):
+                return False
+            if _es_previred_rapido(pdf[0]):
                 return False
             texto, _ = _pagina_texto(pdf[0])
             s = sin_acentos(texto).lower()
