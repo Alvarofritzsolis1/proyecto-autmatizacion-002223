@@ -12,3 +12,7 @@ pypdf>=5,<7
 numpy>=1.26,<3
 
 opencv-python-headless>=4.9,<5
+
+# OCR alternativo gratuito para recibos PREVIRED escaneados.
+rapidocr>=3.10,<4
+onnxruntime>=1.19,<2

@@ -14,7 +14,7 @@ from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 
-VERSION = "18.4"
+VERSION = "18.5-RapidOCR-preview"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -52,6 +52,15 @@ with st.expander("Configuración opcional", expanded=False):
         value=False,
         help="Lee hasta 20 páginas candidatas por PDF. Aumenta la cobertura, pero tarda más.",
     )
+    usar_rapidocr = st.checkbox(
+        "OCR de rescate mejorado (RapidOCR, gratuito)",
+        value=True,
+        help=(
+            "Usa un segundo OCR local solo en páginas escaneadas con datos de "
+            "pago, fecha, período o folio incompletos. No sube PDF a otro servicio. "
+            "Puede aumentar el tiempo por documento."
+        ),
+    )
     a, b = st.columns(2)
     with a:
         tolerancia = st.number_input(
@@ -88,6 +97,7 @@ def _firma_actual():
     h.update(str(bool(incluir_mutual)).encode())
     h.update(str(bool(modo_avanzado)).encode())
     h.update(str(bool(lectura_ampliada)).encode())
+    h.update(str(bool(usar_rapidocr)).encode())
     return h.hexdigest()
 
 if st.button(
@@ -128,7 +138,10 @@ if st.button(
         def _leer_pago_trabajo(data, nombre):
             t = time.perf_counter()
             resultado = analizar_pago_pdf(
-                data, nombre, max_paginas_ocr=20 if lectura_ampliada else 6
+                data, nombre,
+                max_paginas_ocr=20 if lectura_ampliada else 6,
+                usar_rapidocr=usar_rapidocr,
+                max_paginas_rapidocr=3 if lectura_ampliada else 2,
             )
             return resultado, time.perf_counter() - t
 
@@ -143,6 +156,7 @@ if st.button(
                 clave_cache = (
                     VERSION + ":" + hashlib.sha256(data).hexdigest()
                     + ":" + str(lectura_ampliada)
+                    + ":" + str(usar_rapidocr)
                 )
                 if clave_cache in cache_sesion:
                     recibos_ordenados[i] = (
@@ -175,6 +189,12 @@ if st.button(
                 "Segundos": round(segundos, 2),
                 "Páginas": evidencia["paginas"],
                 "Páginas con OCR": evidencia["paginas_ocr"],
+                "Páginas rescate RapidOCR": len(
+                    evidencia.get("rapidocr", {}).get("paginas", [])
+                ),
+                "Rescate RapidOCR": evidencia.get("rapidocr", {}).get(
+                    "estado", "deshabilitado"
+                ),
                 "Comprobantes detectados": len(evidencia["comprobantes"]),
                 "Comprobantes completos": sum(
                     bool(x.get("periodo") and x.get("fecha_pago"))
@@ -270,6 +290,25 @@ elif reporte:
         if tiempos:
             st.dataframe(pd.DataFrame(tiempos), hide_index=True, use_container_width=True)
     st.markdown("#### Estado documental del pago de cotizaciones")
+    total_rescate = sum(
+        len(doc.get("rapidocr", {}).get("paginas", []))
+        for doc in reporte.get("pagos_documentales", [])
+    )
+    if total_rescate:
+        st.caption(
+            f"RapidOCR revisó {total_rescate} página(s) escaneada(s) "
+            "de forma complementaria a Tesseract."
+        )
+    sin_rescate = [
+        doc["archivo"] for doc in reporte.get("pagos_documentales", [])
+        if doc.get("rapidocr", {}).get("estado") == "no_disponible"
+    ]
+    if sin_rescate:
+        st.warning(
+            f"El OCR de rescate no estaba disponible en {len(sin_rescate)} "
+            "archivo(s). Se conservó la lectura original de Tesseract. "
+            "Revisar la instalación de RapidOCR/ONNX."
+        )
     filas_pago = []
     for doc_pago in reporte.get("pagos_documentales", []):
         for ev in doc_pago["comprobantes"]:
@@ -285,7 +324,10 @@ elif reporte:
             })
     if filas_pago:
         alertas_fecha = sum(
-            bool(e.get("conflicto_fecha_ocr"))
+            any(
+                k.startswith("conflicto_") and bool(v)
+                for k, v in e.items()
+            )
             for doc in reporte.get("pagos_documentales", [])
             for e in doc.get("comprobantes", [])
         )
@@ -301,8 +343,8 @@ elif reporte:
         )
         if alertas_fecha:
             st.error(
-                f"{alertas_fecha} comprobante(s) con fechas contradictorias "
-                "entre el texto OCR y el cuadro de Pago Electrónico. "
+                f"{alertas_fecha} comprobante(s) con datos OCR contradictorios "
+                "entre dos lecturas (fecha, folio, período o institución). "
                 "Revisar la página antes de aprobar el pago."
             )
         if sin_folio or sin_institucion:

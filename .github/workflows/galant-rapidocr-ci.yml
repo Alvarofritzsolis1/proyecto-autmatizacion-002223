@@ -1,0 +1,46 @@
+name: GALANT Streamlit - RapidOCR CPU
+on:
+  push:
+    branches: [feature/galant-streamlit-rapidocr-rescate]
+  pull_request:
+    paths:
+      - 'rapidocr_pago.py'
+      - 'pago_documental.py'
+      - 'app.py'
+      - 'requirements.txt'
+      - 'tests/test_rapidocr_pago.py'
+      - '.github/workflows/galant-rapidocr-ci.yml'
+permissions:
+  contents: read
+jobs:
+  rapidocr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Instalar Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - name: Dependencias Python
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Sintaxis Python
+        run: python -m compileall -q rapidocr_pago.py pago_documental.py app.py
+      - name: Pruebas sintéticas de OCR, pago y período
+        run: python -m pytest -q tests/test_rapidocr_pago.py tests/test_pago_documental.py
+      - name: Cargar modelos RapidOCR ONNX y probar inferencia
+        run: |
+          python - <<'PY'
+          from PIL import Image, ImageDraw
+          from rapidocr import RapidOCR
+          im = Image.new("RGB", (560, 130), color="white")
+          ImageDraw.Draw(im).text((25, 35), "Periodo 09/2026 Pago Electronico 13/10/2026", fill="black")
+          salida = RapidOCR()(im)
+          assert salida is not None and hasattr(salida, "txts")
+          print("Modelo RapidOCR cargado correctamente en CPU.")
+          PY
