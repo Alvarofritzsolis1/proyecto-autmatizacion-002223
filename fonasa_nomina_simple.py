@@ -293,24 +293,68 @@ def _nomina_de_imagen(imagen):
     return salida
 
 
-def _es_anexo_fonasa(pagina, orientacion):
+def _tipo_salud(texto):
+    """Identifica la INSTITUCIÓN de salud sin inferirla desde una AFP.
+
+    El encabezado de algunas planillas contiene la palabra "Isapre"
+    como opción no marcada. Una coincidencia de nombre sin encabezado
+    de salud debe tratarse como evidencia insuficiente, nunca como pago.
+    """
+    limpio = "".join(
+        c for c in __import__("unicodedata").normalize("NFD", texto.lower())
+        if __import__("unicodedata").category(c) != "Mn"
+    )
+    if "fonasa" in limpio and (
+        "planilla" in limpio or "detalle" in limpio
+        or "anexo" in limpio
+    ):
+        return "Fonasa"
+    # Reconocer nombres oficiales cuando figuren en el encabezado de salud.
+    marcas = {
+        "Colmena": "colmena", "Cruz Blanca": "cruz blanca",
+        "Consalud": "consalud", "Banmédica": "banmedica",
+        "Vida Tres": "vida tres", "Nueva Masvida": "nueva masvida",
+        "Esencial": "esencial", "Fundación": "fundacion",
+        "Cruz del Norte": "cruz del norte",
+    }
+    tiene_salud = (
+        "isapre" in limpio or
+        ("cotizaciones" in limpio and "salud" in limpio)
+    )
+    if tiene_salud and (
+        "planilla" in limpio or "detalle" in limpio
+        or "anexo" in limpio or "afiliados" in limpio
+    ):
+        for nombre, patron in marcas.items():
+            if patron in limpio:
+                return "Isapre " + nombre
+        if "isapre" in limpio and "fonasa" not in limpio:
+            return "Isapre (no identificada)"
+        if "salud" in limpio and "fonasa" not in limpio:
+            return "Salud (institución por confirmar)"
+    return ""
+
+
+def _cabecera_salud(pagina, orientacion):
     pix = pagina.get_pixmap(
         matrix=fitz.Matrix(1.25, 1.25), colorspace=fitz.csGRAY, alpha=False
     )
     im = Image.frombytes("L", (pix.width, pix.height), pix.samples)
     if orientacion:
         im = im.rotate(orientacion, expand=True)
-    texto = pytesseract.image_to_string(
+    return pytesseract.image_to_string(
         im.crop((0, 0, im.width, int(im.height * .30))),
-        lang="eng", config="--psm 11", timeout=5
-    ).lower()
-    return "fonasa" in texto and (
-        "anexos" in texto or "detalle" in texto
+        lang="eng", config="--psm 11", timeout=5,
     )
 
 
+def _es_anexo_fonasa(pagina, orientacion):
+    """Se conserva el nombre por compatibilidad, detecta Fonasa e Isapres."""
+    return bool(_tipo_salud(_cabecera_salud(pagina, orientacion)))
+
+
 def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
-    """Lee solo candidatos (página del recibo Fonasa y siguiente anexo).
+    """Lee anexos de salud: Fonasa o Isapres (recibo y hoja siguiente).
 
     No hace cuadraturas ni valida pagos. Esa tarea la cumple el lector separado
     de evidencia documental; nunca inferir impago porque falta una fila.
@@ -350,8 +394,21 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
                 im = im.rotate(orientacion, expand=True)
             filas = _nomina_de_imagen(im)
             if filas:
+                # Institución leída EN LA MISMA PÁGINA de salud. No asignar
+                # Fonasa por defecto a una persona adscrita a Isapre.
+                tipo = _tipo_salud(_cabecera_salud(pagina, orientacion))
+                if not tipo:
+                    tipo = "Salud (institución por confirmar)"
+                for fila in filas:
+                    fila["institucion_salud"] = tipo
+                    fila["sistema_salud"] = (
+                        "Fonasa" if tipo == "Fonasa"
+                        else "Isapre" if tipo.startswith("Isapre")
+                        else "Por verificar"
+                    )
                 salida.append({
                     "pagina": idx + 1, "trabajadores": filas,
+                    "institucion_salud": tipo,
                     "rotacion": int(orientacion),
                     "tamano_imagen_px": [int(im.width), int(im.height)],
                 })
