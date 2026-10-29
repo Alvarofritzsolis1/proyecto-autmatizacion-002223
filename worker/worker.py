@@ -17,18 +17,25 @@ from supabase import create_client
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 from pago_documental import analizar_pago_pdf  # noqa: E402
+from worker.vision_rescue import rescatar_con_vision  # noqa: E402
 
 BUCKET = "galant-documentos"
 LOG = logging.getLogger("galant.worker")
 
 
-def construir_resultado(tipo: str, pdf: bytes, archivo: str, max_paginas: int) -> tuple[str, dict]:
+def construir_resultado(tipo: str, pdf: bytes, archivo: str, max_paginas: int,
+                        lector_vision=None) -> tuple[str, dict]:
     """Estado final y resultado limitado a evidencias documentales."""
     if tipo == "cotizaciones":
         info = analizar_pago_pdf(pdf, archivo, max_paginas_ocr=max_paginas)
+        if lector_vision is not None:
+            info = lector_vision(pdf, info)
         recibos = info.get("comprobantes", [])
         existe_conflicto = any(
             r.get("conflicto_fecha_ocr")
+            or r.get("conflicto_folio_ocr")
+            or r.get("conflicto_institucion_ocr")
+            or any(k.startswith("conflicto_") and v for k,v in r.items())
             or r.get("estado") in (
                 "FECHA_REQUIERE_CONFIRMACION",
                 "EVIDENCIA_INSUFICIENTE",
@@ -52,6 +59,9 @@ def construir_resultado(tipo: str, pdf: bytes, archivo: str, max_paginas: int) -
             "comprobantes": recibos,
             "paginas": info.get("paginas", 0),
             "paginas_ocr": info.get("paginas_ocr", 0),
+            "vision_estado": info.get("vision_estado", "deshabilitado"),
+            "vision_paginas": info.get("vision_paginas", []),
+            "vision_errores": info.get("vision_errores", 0),
             "cobertura": "completa_texto" if not parcial else "parcial_ocr",
             "observacion": (
                 "La evidencia documental no equivale a verificación oficial. "
@@ -95,7 +105,10 @@ def ejecutar_una_vez(client, limite: int, max_paginas: int) -> tuple[int, int]:
             if not data or not data.startswith(b"%PDF-"):
                 raise ValueError("Archivo PDF inválido o vacío")
             estado, resultado = construir_resultado(
-                job["tipo"], data, job["archivo"], max_paginas
+                job["tipo"], data, job["archivo"], max_paginas,
+                lector_vision=lambda pdf, info: rescatar_con_vision(
+                    pdf, info, cliente_supabase=client
+                ),
             )
             client.table("galant_documentos").update({
                 "estado": estado,
@@ -107,10 +120,10 @@ def ejecutar_una_vez(client, limite: int, max_paginas: int) -> tuple[int, int]:
             LOG.info("Trabajo %s finalizó: %s", job_id, estado)
         except Exception as exc:
             # Nunca registrar texto OCR privado ni documentos en logs.
-            LOG.exception("Error en trabajo %s", job_id)
+            LOG.warning("Fallo en trabajo %s (tipo=%s)", job_id, type(exc).__name__)
             client.table("galant_documentos").update({
                 "estado": "error",
-                "error": type(exc).__name__ + ": " + str(exc)[:220],
+                "error": "No se pudo completar el OCR (" + type(exc).__name__ + ")",
             }).eq("id", job_id).execute()
     return len(jobs), finalizados
 
