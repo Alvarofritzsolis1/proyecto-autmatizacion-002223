@@ -1,7 +1,7 @@
 name: GALANT Streamlit - pago y nómina Fonasa simplificados
 on:
   push:
-    branches: [fix/galant-fonasa-trabajadores-simple, fix/galant-invalidar-cache-fonasa-v1862, fix/galant-fonasa-trazabilidad-real-20261029]
+    branches: [fix/galant-fonasa-trabajadores-simple, fix/galant-invalidar-cache-fonasa-v1862, fix/galant-fonasa-trazabilidad-real-20261029, fix/galant-fonasa-sin-traza-runtime-20261029]
   pull_request:
     paths:
       - 'fonasa_nomina_simple.py'
@@ -11,6 +11,8 @@ on:
       - 'tests/test_fonasa_dias_robustos.py'
       - 'tests/test_streamlit_fonasa_cache.py'
       - 'fonasa_validacion.py'
+      - 'fonasa_runtime.py'
+      - 'tests/test_fonasa_runtime.py'
       - 'tests/test_fonasa_trazabilidad.py'
       - '.github/workflows/galant-fonasa-simple-ci.yml'
 permissions:
