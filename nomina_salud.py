@@ -135,6 +135,7 @@ def construir_nomina_salud(pagos_documentales, trabajadores_anexos):
                     str(k).startswith("conflicto_") and bool(v)
                     for k, v in (recibo or {}).items()
                 )
+                or verificacion.get("estado") == "OCR_ALTERNATIVO_REVISAR"
                 or "no identificada" in str(inst).lower()
                 or "no identificada" in str(
                     (recibo or {}).get("institucion", "")
