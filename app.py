@@ -213,8 +213,18 @@ if st.button(
                 # Anexos suelen seguir a la carátula; búsqueda acotada.
                 paginas = list(range(2, min(resultado["paginas"], 12) + 1, 2))
             try:
+                instituciones_salud = {
+                    int(e.get("pagina")): e.get("institucion", "")
+                    for e in resultado.get("comprobantes", [])
+                    if isinstance(e.get("pagina"), int)
+                    and (
+                        e.get("institucion") == "Fonasa"
+                        or str(e.get("institucion", "")).startswith("Isapre")
+                    )
+                }
                 nomina = extraer_fonasa_con_contrato(
                     data, paginas_candidatas=paginas,
+                    instituciones_candidatas=instituciones_salud,
                 )
             except Exception as exc:
                 # Un fallo de extracción de nómina NO equivale a impago.
