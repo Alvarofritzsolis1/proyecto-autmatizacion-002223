@@ -84,31 +84,89 @@ def _interpretar(texto,pagina,fuente):
           "El encabezado menciona declaración y no pago, pero hay fecha de pago; revisar regularización."
           if pago_con_respaldo and declaracion_sin_pago else "")}
 
+def _fecha_espacial(datos, ancho, alto):
+    """Asocia la fecha al CUADRO de pago por proximidad visual."""
+    palabras=[str(x).lower() for x in datos["text"]]
+    for i, palabra in enumerate(palabras):
+        if palabra!="pago" or float(datos["conf"][i])<35:
+            continue
+        x=datos["left"][i]/ancho
+        y=datos["top"][i]/alto
+        acompana=any(
+            re.match(r"elec|electr",valor)
+            and abs(datos["top"][j]/alto-y)<0.025
+            and 0<datos["left"][j]/ancho-x<0.18
+            for j,valor in enumerate(palabras)
+        )
+        if not acompana:
+            continue
+        opciones=[]
+        for j,valor in enumerate(palabras):
+            if not re.fullmatch(r"[0-3]?\d[/.-][01]?\d[/.-]20\d{2}",valor):
+                continue
+            distancia_y=datos["top"][j]/alto-y
+            distancia_x=abs(datos["left"][j]/ancho-x)
+            if distancia_x<0.18 and -0.01<distancia_y<0.10 and float(datos["conf"][j])>=45:
+                opciones.append((distancia_y,valor))
+        if opciones:
+            return sorted(opciones)[0][1].replace(".","/").replace("-","/")
+    return ""
+
+def _periodo_espacial(datos, ancho, alto):
+    """Reconoce '09 2026' en celdas contiguas cuando el OCR separa columnas."""
+    posibles=[]
+    for i,ano in enumerate(datos["text"]):
+        if not re.fullmatch(r"20\d{2}",str(ano)):
+            continue
+        x=datos["left"][i]/ancho
+        y=datos["top"][i]/alto
+        for j,mes in enumerate(datos["text"]):
+            if not re.fullmatch(r"(?:0?[1-9]|1[0-2])",str(mes)):
+                continue
+            dx=datos["left"][j]/ancho-x
+            dy=abs(datos["top"][j]/alto-y)
+            if -0.12<dx<0 and dy<0.015 and float(datos["conf"][j])>=35:
+                posibles.append((dy,f"{ano}-{int(mes):02d}"))
+    return sorted(posibles)[0][1] if posibles else ""
+
 def _ocr_portada(pagina, orientacion_previa=None):
-    """OCR limitado a portadas, con prueba de rotación inversa si falla."""
+    """Un OCR espacial por orientación candidata; alternar solo si hace falta."""
     from PIL import Image
     import pytesseract
+    from collections import OrderedDict
     pix=pagina.get_pixmap(matrix=fitz.Matrix(1.8,1.8),
                           colorspace=fitz.csGRAY,alpha=False)
     im=Image.frombytes("L",(pix.width,pix.height),pix.samples)
     opciones=([orientacion_previa] if orientacion_previa is not None else [])
     opciones+=([90,270,0] if im.height>im.width else [0,180])
-    mejor,mejor_rotacion,mejor_puntaje="",None,-1
+    texto_mejor,rotacion_mejor,pago_mejor,periodo_mejor="",None,"",""
+    puntuacion_mejor=-1
     for rot in dict.fromkeys(opciones):
-        img=im.rotate(rot,expand=True) if rot else im
+        foto=im.rotate(rot,expand=True) if rot else im
         try:
-            texto=pytesseract.image_to_string(
-                img,lang="eng",config="--oem 1 --psm 11",timeout=8)
+            datos=pytesseract.image_to_data(
+                foto,lang="eng",config="--oem 1 --psm 11",
+                timeout=8,output_type=pytesseract.Output.DICT)
         except (RuntimeError,OSError):
             continue
-        score=sum(2 for k in ("previred","pago electronico","periodo",
-                               "remuneraciones","cotizaciones")
-                  if k in _flat(texto))
-        if score>mejor_puntaje:
-            mejor,mejor_rotacion,mejor_puntaje=texto,rot,score
-        if score>=6:
+        lineas=OrderedDict()
+        for j,palabra in enumerate(datos["text"]):
+            if not str(palabra).strip():
+                continue
+            clave=(datos["block_num"][j],datos["par_num"][j],datos["line_num"][j])
+            lineas.setdefault(clave,[]).append(str(palabra))
+        texto="\n".join(" ".join(linea) for linea in lineas.values())
+        pago=_fecha_espacial(datos,foto.width,foto.height)
+        periodo=_periodo_espacial(datos,foto.width,foto.height)
+        puntuacion=sum(2 for k in ("previred","pago electronico","periodo",
+                                     "remuneraciones","cotizaciones")
+                       if k in _flat(texto))+(3 if pago else 0)
+        if puntuacion>puntuacion_mejor:
+            texto_mejor,rotacion_mejor,pago_mejor,periodo_mejor=texto,rot,pago,periodo
+            puntuacion_mejor=puntuacion
+        if puntuacion>=9:
             break
-    return mejor,mejor_rotacion
+    return texto_mejor,rotacion_mejor,pago_mejor,periodo_mejor
 
 def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
     """Devuelve evidencias por folio; procesamiento parcial explícito.
@@ -129,9 +187,18 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
             if indice%2!=0 or paginas_ocr>=max_paginas_ocr:
                 continue
             paginas_ocr+=1
-            texto,orientacion=_ocr_portada(pagina,orientacion)
+            texto,orientacion,fecha_visual,periodo_visual=_ocr_portada(pagina,orientacion)
             e=_interpretar(texto,indice+1,"OCR")
-            if e:evidencias.append(e)
+            if e:
+                if periodo_visual and not e["periodo"]:
+                    e["periodo"]=periodo_visual
+                if fecha_visual and not e["fecha_pago"]:
+                    e["fecha_pago"]=fecha_visual
+                    titulo_no_pago=("comprobante de declaracion y no pago" in _flat(texto)
+                                    or "comprobante de declaracion y no de pago" in _flat(texto))
+                    e["estado"]=("PAGO_POSTERIOR_DOCUMENTADO_REVISAR"
+                                  if titulo_no_pago else "PAGO_RESPALDADO_EN_DOCUMENTO")
+                evidencias.append(e)
         # Una página de resumen y su detalle pueden compartir folio.
         por_folio=OrderedDict()
         for e in evidencias:
