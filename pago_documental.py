@@ -64,9 +64,10 @@ def _interpretar(texto,pagina,fuente):
         return None
     fecha=_fecha_pago(texto)
     periodo=_periodo(texto)
+    # Las casillas de Fonasa imprimen "Declaración y no pago" aunque NO estén marcadas.
+    # Considerar la condición solo cuando aparezca en el TÍTULO del comprobante.
     declaracion_sin_pago=("comprobante de declaracion y no pago" in t or
-                          "declaracion y no pago" in t or
-                          "declaracion y no de pago" in t)
+                          "comprobante de declaracion y no de pago" in t)
     pago_con_respaldo=bool(fecha and ("pago electronico" in t or
         "declaracion electronica y pago" in t or "monto pagado" in t))
     if pago_con_respaldo:
