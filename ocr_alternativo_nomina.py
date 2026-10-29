@@ -29,7 +29,7 @@ def leer_columna_dias_rapidocr(imagen, filas, x0, x1, *, confianza_min=.94):
     try:
         with _LOCK:
             resultado = _motor()(np.asarray(recorte))
-    except (OSError, ValueError, RuntimeError):
+    except (ImportError, OSError, ValueError, RuntimeError, TypeError):
         return {}
     cajas = getattr(resultado, "boxes", None)
     textos = getattr(resultado, "txts", None)
