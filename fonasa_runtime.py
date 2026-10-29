@@ -92,6 +92,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
     nomina = modulo.extraer_nomina_fonasa(
         contenido, paginas_candidatas=paginas_candidatas,
         instituciones_candidatas=instituciones_candidatas,
+        usar_ocr_alternativo=usar_ocr_alternativo,
     )
     modo = "paginas_por_comprobante"
     candidatas = []
@@ -110,6 +111,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
             nomina = modulo.extraer_nomina_fonasa(
                 contenido, paginas_candidatas=paginas_rescate,
                 instituciones_candidatas=instituciones_candidatas,
+                usar_ocr_alternativo=usar_ocr_alternativo,
             )
     if not nomina and candidatas and usar_ocr_alternativo:
         # SOLO cuando la retícula encontró tablas y Tesseract no identificó
@@ -130,6 +132,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
                     max(1, x["pagina"] - 1) for x in candidatas[:3]
                 ],
                 instituciones_candidatas=pistas,
+                usar_ocr_alternativo=usar_ocr_alternativo,
             )
     if nomina and not _nomina_tiene_traza(nomina):
         importlib.invalidate_caches()
@@ -139,6 +142,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
         nomina = modulo.extraer_nomina_fonasa(
             contenido, paginas_candidatas=paginas_candidatas,
             instituciones_candidatas=instituciones_candidatas,
+            usar_ocr_alternativo=usar_ocr_alternativo,
         )
         if not _nomina_tiene_traza(nomina):
             raise RuntimeError(
