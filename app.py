@@ -21,10 +21,10 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
-from fonasa_nomina_simple import extraer_nomina_fonasa
+from fonasa_runtime import extraer_fonasa_con_contrato, estado_lector_fonasa
 from fonasa_validacion import comprobar_traza_dias
 
-VERSION = "18.7-Fonasa-trazable"
+VERSION = "18.8-Fonasa-runtime-verificado"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -35,10 +35,23 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.title("GALANT")
+def _estado_motor():
+    """Incluye huella del BYTECODE activo, no solo código fuente en disco."""
+    try:
+        return estado_lector_fonasa()
+    except (OSError, ImportError, RuntimeError, AttributeError) as exc:
+        return {
+            "contrato_traza": False,
+            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+        }
+
+
 def _huella_motor():
-    """Checksum REAL del archivo de código que ejecuta el servidor."""
-    fuente = Path(__file__).with_name("fonasa_nomina_simple.py")
-    return hashlib.sha256(fuente.read_bytes()).hexdigest()[:16]
+    estado = _estado_motor()
+    return (
+        estado.get("sha256_fuente_16", "sin-fuente") + ":"
+        + estado.get("sha256_codigo_activo_16", "sin-modulo")
+    )
 
 
 def _version_tesseract():
@@ -49,10 +62,17 @@ def _version_tesseract():
         # sin hacer que Streamlit se caiga antes de mostrar el diagnóstico.
         return "NO DISPONIBLE"
 
+estado_motor = _estado_motor()
 st.caption(
     f"Control documental de contratistas · {VERSION} "
-    f"· lector { _huella_motor() }"
+    f"· fuente/código en memoria {_huella_motor()}"
 )
+if not estado_motor.get("contrato_traza"):
+    st.error(
+        "El lector Fonasa cargado no corresponde al módulo actualizado. "
+        "No se considerarán válidas lecturas sin trazabilidad. "
+        + estado_motor.get("error", "")
+    )
 st.info("**Modo simplificado activo:** se leen respaldos de pago y trabajadores de Fonasa. No se exige cuadratura de bases imponibles por defecto.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
@@ -190,13 +210,15 @@ if st.button(
                 # Anexos suelen seguir a la carátula; búsqueda acotada.
                 paginas = list(range(2, min(resultado["paginas"], 12) + 1, 2))
             try:
-                nomina = extraer_nomina_fonasa(
+                nomina = extraer_fonasa_con_contrato(
                     data, paginas_candidatas=paginas,
                 )
             except Exception as exc:
                 # Un fallo de extracción de nómina NO equivale a impago.
                 # Informar el tipo de error y conservar los recibos obtenidos.
-                resultado["error_lector_fonasa"] = type(exc).__name__
+                resultado["error_lector_fonasa"] = (
+                    f"{type(exc).__name__}: {str(exc)[:250]}"
+                )
                 nomina = []
             return resultado, time.perf_counter() - t, nomina
 
@@ -324,6 +346,7 @@ if st.button(
         "entorno": {
             "release": VERSION,
             "codigo_lector_sha256_16": _huella_motor(),
+            "lector_cargado": _estado_motor(),
             "python": sys.version.split()[0],
             "sistema": platform.system(),
             "opencv": cv2.__version__,
@@ -434,6 +457,16 @@ elif reporte:
             ),
         })
     if filas_fonasa:
+        cantidad_sin_traza = sum(
+            x["Estado OCR días"] == "SIN_TRAZA" for x in filas_fonasa
+        )
+        if cantidad_sin_traza:
+            st.error(
+                f"{cantidad_sin_traza} trabajador(es) sin traza del módulo "
+                "OCR. Es una FALLA DEL LECTOR EN MEMORIA, no una prueba "
+                "de días no trabajados. Reiniciar Streamlit y revisar "
+                "diagnóstico de fuente/código en memoria."
+            )
         tabla_fonasa = pd.DataFrame(filas_fonasa)
         # Columnas numéricas con valores anulables: no mostrar la palabra
         # "None" como si fuera un resultado de los días del trabajador.
