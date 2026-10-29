@@ -362,10 +362,35 @@ elif reporte:
         })
     if filas_fonasa:
         tabla_fonasa = pd.DataFrame(filas_fonasa)
-        st.dataframe(tabla_fonasa, hide_index=True, use_container_width=True)
+        tabla_editada = st.data_editor(
+            tabla_fonasa,
+            hide_index=True, use_container_width=True,
+            num_rows="fixed",
+            disabled=[c for c in tabla_fonasa.columns if c != "Días trabajados"],
+            column_config={
+                "Días trabajados": st.column_config.NumberColumn(
+                    "Días trabajados", min_value=0, max_value=31, step=1,
+                    help="Corregir únicamente después de cotejar el anexo Fonasa.",
+                ),
+            },
+            key="correccion_fonasa_" + reporte["firma"][:12],
+        )
+        antes = pd.to_numeric(tabla_fonasa["Días trabajados"], errors="coerce")
+        despues = pd.to_numeric(tabla_editada["Días trabajados"], errors="coerce")
+        correcciones = ~(
+            antes.eq(despues) | (antes.isna() & despues.isna())
+        )
+        if correcciones.any():
+            st.info(
+                f"{int(correcciones.sum())} valor(es) corregidos manualmente "
+                "contra el comprobante Fonasa. No son una certificación del sistema."
+            )
+            tabla_editada.loc[correcciones, "Observación"] = (
+                "Valor corregido manualmente; cotejar con anexo original"
+            )
         st.download_button(
             "Descargar trabajadores Fonasa (Excel/CSV)",
-            data=tabla_fonasa.to_csv(index=False).encode("utf-8-sig"),
+            data=tabla_editada.to_csv(index=False).encode("utf-8-sig"),
             file_name="GALANT_Trabajadores_Fonasa.csv", mime="text/csv",
         )
         ambiguos = sum(x.get("dias_requieren_revision", False)
