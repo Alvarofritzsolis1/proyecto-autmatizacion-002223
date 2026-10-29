@@ -1,5 +1,7 @@
--r ../requirements.txt
+# Worker de Cloud Run: dependencias mínimas para PREVIRED y F30-1.
+# La interfaz Streamlit/Next.js no se ejecuta aquí.
+PyMuPDF>=1.25,<2
+pytesseract>=0.3.13,<0.4
+Pillow>=10,<13
 supabase>=2.0,<3
-
-# Se invoca solo si GALANT_VISION_ENABLED=true.
 google-cloud-vision>=3.7,<4
