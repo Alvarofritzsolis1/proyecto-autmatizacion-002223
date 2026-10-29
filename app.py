@@ -13,8 +13,9 @@ from f301_lector import analizar_f301, es_f301
 from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
+from fonasa_nomina_simple import extraer_nomina_fonasa
 
-VERSION = "18.5-RapidOCR-preview"
+VERSION = "18.6-Fonasa-simple"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -25,7 +26,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.title("GALANT")
-st.caption("Control documental de contratistas")
+st.caption(f"Control documental de contratistas · {VERSION}")
+st.info("**Modo simplificado activo:** se leen respaldos de pago y trabajadores de Fonasa. No se exige cuadratura de bases imponibles por defecto.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
 st.subheader("Subir archivos")
@@ -43,7 +45,7 @@ if limite_excedido:
 
 with st.expander("Configuración opcional", expanded=False):
     modo_avanzado = st.checkbox(
-        "Ejecutar además la auditoría avanzada de nóminas y bases imponibles",
+        "Auditoría avanzada de montos y bases imponibles (no necesaria para verificar respaldo de pago)",
         value=False,
         help="La revisión rápida de respaldo de pago, fecha y período funciona sin extraer toda la nómina.",
     )
@@ -123,6 +125,7 @@ if st.button(
     excel, detalle, log = None, pd.DataFrame(), pd.DataFrame()
     errores = []
     pagos_documentales = []
+    nominas_fonasa = []
     tiempos_pagos = []
     cache_sesion = st.session_state.setdefault("galant_cache_pago", {})
     with st.spinner("Leyendo documentos y conciliando sus respaldos..."):
@@ -143,7 +146,22 @@ if st.button(
                 usar_rapidocr=usar_rapidocr,
                 max_paginas_rapidocr=3 if lectura_ampliada else 2,
             )
-            return resultado, time.perf_counter() - t
+            # Extraer nombres/RUT/días del anexo Fonasa sin cuadre de montos.
+            # Primero páginas asociadas al comprobante, no todas las páginas.
+            paginas = [
+                e.get("pagina") for e in resultado.get("comprobantes", [])
+                if "fonasa" in str(e.get("institucion", "")).lower()
+            ]
+            if not paginas:
+                # Anexos suelen seguir a la carátula; búsqueda acotada.
+                paginas = list(range(2, min(resultado["paginas"], 12) + 1, 2))
+            try:
+                nomina = extraer_nomina_fonasa(
+                    data, paginas_candidatas=paginas,
+                )
+            except (RuntimeError, ValueError, OSError, ImportError):
+                nomina = []
+            return resultado, time.perf_counter() - t, nomina
 
         recibos_ordenados = {}
         pdfs_pago = [
@@ -169,7 +187,9 @@ if st.button(
             for futuro in as_completed(trabajos):
                 i, clave_cache, nombre = trabajos[futuro]
                 try:
-                    evidencia, segundos = futuro.result()
+                    evidencia, segundos, nomina = futuro.result()
+                    evidencia = dict(evidencia)
+                    evidencia["nomina_fonasa"] = nomina
                     cache_sesion[clave_cache] = dict(evidencia)
                     # Máximo 50 resultados en la sesión privada, sin caché global.
                     if len(cache_sesion) > 50:
@@ -184,6 +204,13 @@ if st.button(
             evidencia = dict(evidencia)
             evidencia["archivo"] = nombre
             pagos_documentales.append(evidencia)
+            for anexo in evidencia.get("nomina_fonasa", []):
+                for fila in anexo.get("trabajadores", []):
+                    nominas_fonasa.append({
+                        **fila,
+                        "archivo": nombre,
+                        "pagina_fonasa": anexo["pagina"],
+                    })
             tiempos_pagos.append({
                 "Archivo": nombre,
                 "Segundos": round(segundos, 2),
@@ -194,6 +221,10 @@ if st.button(
                 ),
                 "Rescate RapidOCR": evidencia.get("rapidocr", {}).get(
                     "estado", "deshabilitado"
+                ),
+                "Trabajadores Fonasa": sum(
+                    len(x.get("trabajadores", []))
+                    for x in evidencia.get("nomina_fonasa", [])
                 ),
                 "Comprobantes detectados": len(evidencia["comprobantes"]),
                 "Comprobantes completos": sum(
@@ -241,6 +272,7 @@ if st.button(
         "bandeja": bandeja, "calidad": calidad, "reporte_excel": reporte_excel,
         "duplicados": duplicados, "errores": errores,
         "pagos_documentales": pagos_documentales,
+        "nominas_fonasa": nominas_fonasa,
         "tiempos_pagos": tiempos_pagos,
         "duracion": time.perf_counter()-inicio,
     }
@@ -289,6 +321,91 @@ elif reporte:
         tiempos = reporte.get("tiempos_pagos", [])
         if tiempos:
             st.dataframe(pd.DataFrame(tiempos), hide_index=True, use_container_width=True)
+    st.markdown("#### Trabajadores declarados en Fonasa")
+    st.caption(
+        "Nómina simplificada del anexo Fonasa: trabajador, RUT, días "
+        "trabajados y período. No se realizan cuadrados de bases imponibles."
+    )
+    filas_fonasa = []
+    for trabajador in reporte.get("nominas_fonasa", []):
+        archivo = trabajador.get("archivo", "")
+        periodo = ""
+        fecha_pago = ""
+        folio = ""
+        for recibo in reporte.get("pagos_documentales", []):
+            if recibo.get("archivo") != archivo:
+                continue
+            candidatos = [
+                x for x in recibo.get("comprobantes", [])
+                if "fonasa" in str(x.get("institucion", "")).lower()
+            ]
+            if candidatos:
+                periodos = {x.get("periodo") for x in candidatos if x.get("periodo")}
+                fechas = {x.get("fecha_pago") for x in candidatos if x.get("fecha_pago")}
+                folios = {x.get("folio") for x in candidatos if x.get("folio")}
+                periodo = next(iter(periodos)) if len(periodos) == 1 else "Revisar"
+                fecha_pago = next(iter(fechas)) if len(fechas) == 1 else "Revisar"
+                folio = next(iter(folios)) if len(folios) == 1 else "Revisar"
+            break
+        filas_fonasa.append({
+            "Archivo": archivo,
+            "Nombre trabajador": trabajador.get("trabajador_nombre", ""),
+            "RUT": trabajador.get("trabajador_rut", ""),
+            "Días trabajados": trabajador.get("dias_trabajados_fonasa"),
+            "Período": periodo or "Por confirmar",
+            "Fecha pago Fonasa": fecha_pago or "Por confirmar",
+            "Folio Fonasa": folio or "Por confirmar",
+            "Página anexo": trabajador.get("pagina_fonasa", ""),
+            "Observación": (
+                "Revisar días en anexo (OCR ambiguo)"
+                if trabajador.get("dias_requieren_revision") else ""
+            ),
+        })
+    if filas_fonasa:
+        tabla_fonasa = pd.DataFrame(filas_fonasa)
+        tabla_editada = st.data_editor(
+            tabla_fonasa,
+            hide_index=True, use_container_width=True,
+            num_rows="fixed",
+            disabled=[c for c in tabla_fonasa.columns if c != "Días trabajados"],
+            column_config={
+                "Días trabajados": st.column_config.NumberColumn(
+                    "Días trabajados", min_value=0, max_value=31, step=1,
+                    help="Corregir únicamente después de cotejar el anexo Fonasa.",
+                ),
+            },
+            key="correccion_fonasa_" + reporte["firma"][:12],
+        )
+        antes = pd.to_numeric(tabla_fonasa["Días trabajados"], errors="coerce")
+        despues = pd.to_numeric(tabla_editada["Días trabajados"], errors="coerce")
+        correcciones = ~(
+            antes.eq(despues) | (antes.isna() & despues.isna())
+        )
+        if correcciones.any():
+            st.info(
+                f"{int(correcciones.sum())} valor(es) corregidos manualmente "
+                "contra el comprobante Fonasa. No son una certificación del sistema."
+            )
+            tabla_editada.loc[correcciones, "Observación"] = (
+                "Valor corregido manualmente; cotejar con anexo original"
+            )
+        st.download_button(
+            "Descargar trabajadores Fonasa (Excel/CSV)",
+            data=tabla_editada.to_csv(index=False).encode("utf-8-sig"),
+            file_name="GALANT_Trabajadores_Fonasa.csv", mime="text/csv",
+        )
+        ambiguos = sum(x.get("dias_requieren_revision", False)
+                       for x in reporte.get("nominas_fonasa", []))
+        if ambiguos:
+            st.info(
+                f"{ambiguos} registro(s) con días difíciles de reconocer; "
+                "revisar el anexo original. No equivale a cotizaciones impagas."
+            )
+    else:
+        st.info(
+            "No se pudo localizar una nómina Fonasa confiable en los documentos. "
+            "La lectura de comprobantes de pago se muestra por separado."
+        )
     st.markdown("#### Estado documental del pago de cotizaciones")
     total_rescate = sum(
         len(doc.get("rapidocr", {}).get("paginas", []))
