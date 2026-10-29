@@ -15,7 +15,7 @@ from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 from fonasa_nomina_simple import extraer_nomina_fonasa
 
-VERSION = "18.6.1-Fonasa-dias"
+VERSION = "18.6.2-Fonasa-actualizado"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -90,6 +90,9 @@ with st.expander("Configuración opcional", expanded=False):
 
 def _firma_actual():
     h = hashlib.sha256()
+    # La versión del motor FORMA PARTE de la huella. Si la app se actualiza
+    # conservando la sesión, un reporte anterior no puede mostrarse como nuevo.
+    h.update(VERSION.encode("utf-8"))
     for archivo in archivos:
         h.update(archivo.name.encode("utf-8", errors="replace"))
         h.update(archivo.getvalue())
@@ -106,6 +109,9 @@ if st.button(
     "Analizar documentos", type="primary", disabled=not archivos or limite_excedido,
 ):
     st.session_state.pop("reporte_galant", None)
+    # Cada clic es una solicitud explícita de REANÁLISIS. No reutilizar
+    # una nómina Fonasa incorrecta del caché de la misma sesión.
+    st.session_state.pop("galant_cache_pago", None)
     inicio = time.perf_counter()
     firma = _firma_actual()
     entradas = []
@@ -265,7 +271,8 @@ if st.button(
         except Exception:
             reporte_excel = None  # No perder la auditoría si el exportador falla.
     st.session_state["reporte_galant"] = {
-        "firma": firma, "certificados": certificados,
+        "firma": firma, "engine_release": VERSION,
+        "certificados": certificados,
         "nomina": nomina, "incidencias": incidencias,
         "matriz": matriz, "excel": excel, "detalle": detalle, "log": log,
         "cruce_detalle": cruzados, "cruce_resumen": resumen_cruce,
@@ -278,6 +285,17 @@ if st.button(
     }
 
 reporte = st.session_state.get("reporte_galant")
+if reporte and reporte.get("engine_release") != VERSION:
+    # Streamlit puede preservar session_state y st.data_editor después de
+    # desplegar otro commit. Invalidar el informe antes de mostrar cualquier
+    # resultado antiguo: nunca presentar 2/None como si fuera OCR 18.6.2.
+    st.session_state.pop("reporte_galant", None)
+    st.warning(
+        "GALANT actualizó su lector de días Fonasa. "
+        "El informe anterior se descartó. Presiona «Analizar documentos» "
+        "para recalcular los valores con esta versión."
+    )
+    reporte = None
 if reporte and (not archivos or reporte["firma"] != _firma_actual()):
     st.info("Cambiaste los archivos. Presiona «Analizar documentos» para actualizar.")
 elif reporte:
@@ -363,6 +381,11 @@ elif reporte:
         })
     if filas_fonasa:
         tabla_fonasa = pd.DataFrame(filas_fonasa)
+        # Columnas numéricas con valores anulables: no mostrar la palabra
+        # "None" como si fuera un resultado de los días del trabajador.
+        tabla_fonasa["Días trabajados"] = pd.to_numeric(
+            tabla_fonasa["Días trabajados"], errors="coerce"
+        ).astype("Int64")
         tabla_editada = st.data_editor(
             tabla_fonasa,
             hide_index=True, use_container_width=True,
@@ -374,7 +397,9 @@ elif reporte:
                     help="Corregir únicamente después de cotejar el anexo Fonasa.",
                 ),
             },
-            key="correccion_fonasa_" + reporte["firma"][:12],
+            # La clave del editor debe cambiar con la versión del OCR:
+            # Streamlit conserva ediciones antiguas bajo la misma clave.
+            key="correccion_fonasa_" + VERSION + "_" + reporte["firma"][:12],
         )
         antes = pd.to_numeric(tabla_fonasa["Días trabajados"], errors="coerce")
         despues = pd.to_numeric(tabla_editada["Días trabajados"], errors="coerce")
