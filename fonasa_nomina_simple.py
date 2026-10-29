@@ -7,6 +7,7 @@ Un día no legible se devuelve como None, jamás como 0 ni como impago.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 
 import cv2
@@ -301,14 +302,9 @@ def _tipo_salud(texto):
     de salud debe tratarse como evidencia insuficiente, nunca como pago.
     """
     limpio = "".join(
-        c for c in __import__("unicodedata").normalize("NFD", texto.lower())
-        if __import__("unicodedata").category(c) != "Mn"
+        c for c in unicodedata.normalize("NFD", texto.lower())
+        if unicodedata.category(c) != "Mn"
     )
-    if "fonasa" in limpio and (
-        "planilla" in limpio or "detalle" in limpio
-        or "anexo" in limpio
-    ):
-        return "Fonasa"
     # Reconocer nombres oficiales cuando figuren en el encabezado de salud.
     marcas = {
         "Colmena": "colmena", "Cruz Blanca": "cruz blanca",
@@ -325,13 +321,21 @@ def _tipo_salud(texto):
         "planilla" in limpio or "detalle" in limpio
         or "anexo" in limpio or "afiliados" in limpio
     ):
-        for nombre, patron in marcas.items():
-            if patron in limpio:
-                return "Isapre " + nombre
-        if "isapre" in limpio and "fonasa" not in limpio:
+        if "isapre" in limpio:
+            for nombre, patron in marcas.items():
+                if patron in limpio:
+                    return "Isapre " + nombre
+        # Fonasa tiene prioridad frente a menciones genéricas de Isapre
+        # como opciones no marcadas en los formularios.
+        if "fonasa" in limpio:
+            return "Fonasa"
+        if "isapre" in limpio:
             return "Isapre (no identificada)"
-        if "salud" in limpio and "fonasa" not in limpio:
-            return "Salud (institución por confirmar)"
+        return "Salud (institución por confirmar)"
+    if "fonasa" in limpio and (
+        "planilla" in limpio or "detalle" in limpio or "anexo" in limpio
+    ):
+        return "Fonasa"
     return ""
 
 
@@ -349,8 +353,8 @@ def _cabecera_salud(pagina, orientacion):
 
 
 def _es_anexo_fonasa(pagina, orientacion):
-    """Se conserva el nombre por compatibilidad, detecta Fonasa e Isapres."""
-    return bool(_tipo_salud(_cabecera_salud(pagina, orientacion)))
+    """Devuelve el tipo de salud (truthy) para evitar segundo OCR del título."""
+    return _tipo_salud(_cabecera_salud(pagina, orientacion))
 
 
 def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
@@ -380,9 +384,14 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
             )
             girar = 90 if pix.height > pix.width else 0
             opciones = [girar, 270 if girar == 90 else 180]
-            orientacion = next(
-                (o for o in opciones if _es_anexo_fonasa(pagina, o)), None
-            )
+            orientacion, tipo = None, ""
+            for o in opciones:
+                identificado = _es_anexo_fonasa(pagina, o)
+                if identificado:
+                    orientacion = o
+                    # Los tests históricos simulan True, no el texto.
+                    tipo = identificado if isinstance(identificado, str) else ""
+                    break
             if orientacion is None:
                 continue
             pix = pagina.get_pixmap(
@@ -396,7 +405,7 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
             if filas:
                 # Institución leída EN LA MISMA PÁGINA de salud. No asignar
                 # Fonasa por defecto a una persona adscrita a Isapre.
-                tipo = _tipo_salud(_cabecera_salud(pagina, orientacion))
+                tipo = tipo or "Salud (institución por confirmar)"
                 if not tipo:
                     tipo = "Salud (institución por confirmar)"
                 for fila in filas:
