@@ -1065,10 +1065,17 @@ def limpiar_y_transformar(df_crudo: pd.DataFrame, nombre_archivo: str) -> pd.Dat
     if df.empty:
         raise ValueError("No se identificaron registros de trabajadores luego de la limpieza.")
 
-    df["__rut_invalido"] = [
-        not rut_chileno_valido(c) or not rut_chileno_valido(t)
-        for c, t in zip(df["contratista_rut"], df["trabajador_rut"])
+    # Separar RUT de empleador y trabajador. Una celda vacía es DATO AUSENTE,
+    # no significa que el RUT válido del trabajador tenga dígito erróneo.
+    df["__rut_contratista_invalido"] = [
+        bool(c) and not rut_chileno_valido(c) for c in df["contratista_rut"]
     ]
+    df["__rut_trabajador_invalido"] = [
+        bool(t) and not rut_chileno_valido(t) for t in df["trabajador_rut"]
+    ]
+    df["__rut_invalido"] = (
+        df["__rut_contratista_invalido"] | df["__rut_trabajador_invalido"]
+    )
     # No se suman registros repetidos de manera automática: podrían ser páginas duplicadas
     # o fuentes que se contradicen. Se marcan para revisión, evitando inflar días/rentas.
     keys_validas = df["periodo_remuneracion"].ne("") & df["contratista_rut"].ne("") & df["trabajador_rut"].ne("")
@@ -1187,8 +1194,12 @@ def aplicar_motor_auditoria(
         conflicto_pdf = str(fila.get("__conflicto_pdf", "") or "").strip()
         if conflicto_pdf and conflicto_pdf.lower() not in {"nan", "none", "<na>"}:
             razones.append("Conflicto entre tablas del PDF: " + conflicto_pdf)
-        if bool(fila.get("__rut_invalido", False)):
-            razones.append("RUT del contratista o trabajador no supera la validación de dígito verificador")
+        # Distinguir error de DV de la ausencia de datos. No atribuir un
+        # problema del RUT del contratista al RUT del trabajador.
+        if bool(fila.get("__rut_contratista_invalido", False)):
+            razones.append("RUT del contratista inválido: dígito verificador incorrecto")
+        if bool(fila.get("__rut_trabajador_invalido", False)):
+            razones.append("RUT del trabajador inválido: dígito verificador incorrecto")
         valores_invalidos = [x for x in str(fila.get("__valores_invalidos", "") or "").split("|") if x]
         if valores_invalidos:
             razones.append("Valores numéricos inválidos o negativos: " + ", ".join(valores_invalidos))
