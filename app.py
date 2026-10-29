@@ -13,7 +13,7 @@ from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 
-VERSION = "18.3"
+VERSION = "18.4"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -45,6 +45,11 @@ with st.expander("Configuración opcional", expanded=False):
         "Ejecutar además la auditoría avanzada de nóminas y bases imponibles",
         value=False,
         help="La revisión rápida de respaldo de pago, fecha y período funciona sin extraer toda la nómina.",
+    )
+    lectura_ampliada = st.checkbox(
+        "Ampliar la búsqueda en escaneos con muchas instituciones",
+        value=False,
+        help="Lee hasta 20 páginas candidatas por PDF. Aumenta la cobertura, pero tarda más.",
     )
     a, b = st.columns(2)
     with a:
@@ -81,6 +86,7 @@ def _firma_actual():
     h.update(str(int(tolerancia)).encode())
     h.update(str(bool(incluir_mutual)).encode())
     h.update(str(bool(modo_avanzado)).encode())
+    h.update(str(bool(lectura_ampliada)).encode())
     return h.hexdigest()
 
 if st.button(
@@ -106,6 +112,8 @@ if st.button(
     excel, detalle, log = None, pd.DataFrame(), pd.DataFrame()
     errores = []
     pagos_documentales = []
+    tiempos_pagos = []
+    cache_sesion = st.session_state.setdefault("galant_cache_pago", {})
     with st.spinner("Leyendo documentos y conciliando sus respaldos..."):
         f301, previred = [], []
         for data, nombre in entradas:
@@ -119,7 +127,34 @@ if st.button(
             if not nombre.lower().endswith(".pdf"):
                 continue
             try:
-                pagos_documentales.append(analizar_pago_pdf(data, nombre))
+                inicio_pdf = time.perf_counter()
+                clave_cache = VERSION + ":" + hashlib.sha256(data).hexdigest() + ":" + str(lectura_ampliada)
+                reutilizado = clave_cache in cache_sesion
+                if reutilizado:
+                    evidencia = dict(cache_sesion[clave_cache])
+                else:
+                    evidencia = analizar_pago_pdf(
+                        data, nombre, max_paginas_ocr=20 if lectura_ampliada else 6
+                    )
+                    cache_sesion[clave_cache] = dict(evidencia)
+                    # Caché privada de esta sesión; nunca guardar PDFs ni datos
+                    # personales en un caché global compartido entre usuarios.
+                    if len(cache_sesion) > 50:
+                        cache_sesion.pop(next(iter(cache_sesion)))
+                evidencia["archivo"] = nombre
+                pagos_documentales.append(evidencia)
+                tiempos_pagos.append({
+                    "Archivo": nombre,
+                    "Segundos": round(time.perf_counter() - inicio_pdf, 2),
+                    "Páginas": evidencia["paginas"],
+                    "Páginas con OCR": evidencia["paginas_ocr"],
+                    "Comprobantes detectados": len(evidencia["comprobantes"]),
+                    "Comprobantes completos": sum(
+                        bool(x.get("periodo") and x.get("fecha_pago"))
+                        for x in evidencia["comprobantes"]
+                    ),
+                    "Caché": "Reutilizado" if reutilizado else "Analizado",
+                })
             except Exception as exc:
                 errores.append("Lectura de pago: " + nombre + ": " + str(exc)[:250])
         if f301:
@@ -160,6 +195,7 @@ if st.button(
         "bandeja": bandeja, "calidad": calidad, "reporte_excel": reporte_excel,
         "duplicados": duplicados, "errores": errores,
         "pagos_documentales": pagos_documentales,
+        "tiempos_pagos": tiempos_pagos,
         "duracion": time.perf_counter()-inicio,
     }
 
@@ -201,6 +237,12 @@ elif reporte:
     if reporte["duplicados"]:
         st.info("Se omitieron archivos repetidos para evitar contar dos veces.")
 
+    st.caption(f"Duración total del análisis: {reporte['duracion']:.2f} segundos. "
+               "La duración depende del servidor y del tamaño de los documentos.")
+    with st.expander("Rendimiento por archivo: tiempos y cobertura"):
+        tiempos = reporte.get("tiempos_pagos", [])
+        if tiempos:
+            st.dataframe(pd.DataFrame(tiempos), hide_index=True, use_container_width=True)
     st.markdown("#### Estado documental del pago de cotizaciones")
     filas_pago = []
     for doc_pago in reporte.get("pagos_documentales", []):
@@ -216,6 +258,15 @@ elif reporte:
                 "Observación": ev["observacion"],
             })
     if filas_pago:
+        completos = sum(
+            bool(e.get("periodo") and e.get("fecha_pago"))
+            for doc in reporte.get("pagos_documentales", [])
+            for e in doc.get("comprobantes", [])
+        )
+        st.caption(
+            f"Comprobantes con fecha y período: {completos} de {len(filas_pago)}. "
+            "Los restantes requieren revisión; no se clasifican como impagos."
+        )
         tabla_pago = pd.DataFrame(filas_pago)
         st.dataframe(tabla_pago, hide_index=True, use_container_width=True)
         st.download_button(
