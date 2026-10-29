@@ -78,7 +78,8 @@ def _nomina_tiene_traza(nomina: list) -> bool:
     )
 
 
-def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None):
+def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
+                                instituciones_candidatas=None):
     """Nunca entrega cinco trabajadores sin trazabilidad de sus cifras.
 
     Si el primer resultado carece de traza, recarga el módulo y reintenta UNA
@@ -87,6 +88,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None):
     modulo = cargar_lector_fonasa()
     nomina = modulo.extraer_nomina_fonasa(
         contenido, paginas_candidatas=paginas_candidatas,
+        instituciones_candidatas=instituciones_candidatas,
     )
     if _nomina_tiene_traza(nomina):
         return nomina
@@ -96,6 +98,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None):
         raise RuntimeError("Fonasa: bytecode OCR desactualizado tras recarga.")
     nomina = modulo.extraer_nomina_fonasa(
         contenido, paginas_candidatas=paginas_candidatas,
+        instituciones_candidatas=instituciones_candidatas,
     )
     if not _nomina_tiene_traza(nomina):
         raise RuntimeError(
