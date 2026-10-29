@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from datetime import datetime, timezone
 
 from supabase import create_client
 
@@ -100,7 +101,7 @@ def ejecutar_una_vez(client, limite: int, max_paginas: int) -> tuple[int, int]:
                 "estado": estado,
                 "resultado": resultado,
                 "error": None,
-                "procesado_at": "now()",
+                "procesado_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", job_id).execute()
             finalizados += 1
             LOG.info("Trabajo %s finalizó: %s", job_id, estado)
@@ -121,9 +122,9 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     url = os.environ.get("SUPABASE_URL")
-    secret = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    secret = os.environ.get("SUPABASE_SECRET_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not secret:
-        raise SystemExit("Faltan SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en entorno PRIVADO")
+        raise SystemExit("Faltan SUPABASE_URL y SUPABASE_SECRET_KEY en entorno PRIVADO")
     client = create_client(url, secret)
     max_pages = max(1, min(int(os.environ.get("GALANT_MAX_OCR_PAGES", "12")), 100))
     poll_seconds = max(2, int(os.environ.get("GALANT_POLL_SECONDS", "10")))
