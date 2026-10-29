@@ -337,7 +337,7 @@ def _pago_resumen(texto: str) -> str:
 
 
 def es_f301(data: bytes, nombre: str) -> bool:
-    """Detecta incluso archivos mal nombrados por cabecera, no solo por '_F30'."""
+    """Identifica F30-1 por contenido: el nombre nunca acredita el tipo."""
     if re.search(r'(?i)(?:^|[_\s-])F30(?:[-_ ]?1)?(?:[_.( ]|$)', nombre):
         return True
     if not data.startswith(b'%PDF'):
