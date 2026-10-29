@@ -2,6 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import platform
+import sys
+from pathlib import Path
+
+import cv2
+import pytesseract
+import fitz
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import pandas as pd
@@ -15,7 +23,7 @@ from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 from fonasa_nomina_simple import extraer_nomina_fonasa
 
-VERSION = "18.6.2-Fonasa-actualizado"
+VERSION = "18.7-Fonasa-trazable"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -26,7 +34,15 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.title("GALANT")
-st.caption(f"Control documental de contratistas · {VERSION}")
+def _huella_motor():
+    """Checksum REAL del archivo de código que ejecuta el servidor."""
+    fuente = Path(__file__).with_name("fonasa_nomina_simple.py")
+    return hashlib.sha256(fuente.read_bytes()).hexdigest()[:16]
+
+st.caption(
+    f"Control documental de contratistas · {VERSION} "
+    f"· lector { _huella_motor() }"
+)
 st.info("**Modo simplificado activo:** se leen respaldos de pago y trabajadores de Fonasa. No se exige cuadratura de bases imponibles por defecto.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
@@ -93,6 +109,7 @@ def _firma_actual():
     # La versión del motor FORMA PARTE de la huella. Si la app se actualiza
     # conservando la sesión, un reporte anterior no puede mostrarse como nuevo.
     h.update(VERSION.encode("utf-8"))
+    h.update(_huella_motor().encode("ascii"))
     for archivo in archivos:
         h.update(archivo.name.encode("utf-8", errors="replace"))
         h.update(archivo.getvalue())
@@ -132,6 +149,7 @@ if st.button(
     errores = []
     pagos_documentales = []
     nominas_fonasa = []
+    pruebas_ejecucion = []
     tiempos_pagos = []
     cache_sesion = st.session_state.setdefault("galant_cache_pago", {})
     with st.spinner("Leyendo documentos y conciliando sus respaldos..."):
@@ -209,6 +227,15 @@ if st.button(
             evidencia, nombre, segundos, reutilizado = recibos_ordenados[i]
             evidencia = dict(evidencia)
             evidencia["archivo"] = nombre
+            # Este identificador permite comprobar si la app recibió
+            # los MISMOS bytes que se evaluaron fuera de Streamlit.
+            archivo_original = next(
+                (data for data, n in entradas if n == nombre), None
+            )
+            evidencia["sha256_pdf"] = (
+                hashlib.sha256(archivo_original).hexdigest()
+                if archivo_original is not None else ""
+            )
             pagos_documentales.append(evidencia)
             for anexo in evidencia.get("nomina_fonasa", []):
                 for fila in anexo.get("trabajadores", []):
@@ -216,6 +243,7 @@ if st.button(
                         **fila,
                         "archivo": nombre,
                         "pagina_fonasa": anexo["pagina"],
+                        "rotacion_fonasa": anexo.get("rotacion"),
                     })
             tiempos_pagos.append({
                 "Archivo": nombre,
@@ -280,6 +308,15 @@ if st.button(
         "duplicados": duplicados, "errores": errores,
         "pagos_documentales": pagos_documentales,
         "nominas_fonasa": nominas_fonasa,
+        "entorno": {
+            "release": VERSION,
+            "codigo_lector_sha256_16": _huella_motor(),
+            "python": sys.version.split()[0],
+            "sistema": platform.system(),
+            "opencv": cv2.__version__,
+            "tesseract": str(pytesseract.get_tesseract_version()),
+            "streamlit": st.__version__,
+        },
         "tiempos_pagos": tiempos_pagos,
         "duracion": time.perf_counter()-inicio,
     }
@@ -370,6 +407,7 @@ elif reporte:
             "Nombre trabajador": trabajador.get("trabajador_nombre", ""),
             "RUT": trabajador.get("trabajador_rut", ""),
             "Días trabajados": trabajador.get("dias_trabajados_fonasa"),
+            "Método de lectura": trabajador.get("metodo_dias", "Sin traza"),
             "Período": periodo or "Por confirmar",
             "Fecha pago Fonasa": fecha_pago or "Por confirmar",
             "Folio Fonasa": folio or "Por confirmar",
@@ -386,39 +424,184 @@ elif reporte:
         tabla_fonasa["Días trabajados"] = pd.to_numeric(
             tabla_fonasa["Días trabajados"], errors="coerce"
         ).astype("Int64")
-        tabla_editada = st.data_editor(
-            tabla_fonasa,
-            hide_index=True, use_container_width=True,
-            num_rows="fixed",
-            disabled=[c for c in tabla_fonasa.columns if c != "Días trabajados"],
-            column_config={
-                "Días trabajados": st.column_config.NumberColumn(
-                    "Días trabajados", min_value=0, max_value=31, step=1,
-                    help="Corregir únicamente después de cotejar el anexo Fonasa.",
-                ),
-            },
-            # La clave del editor debe cambiar con la versión del OCR:
-            # Streamlit conserva ediciones antiguas bajo la misma clave.
-            key="correccion_fonasa_" + VERSION + "_" + reporte["firma"][:12],
+        # La tabla principal es SOLO OCR, no mezcla correcciones anteriores.
+        st.dataframe(
+            tabla_fonasa, hide_index=True, use_container_width=True
         )
-        antes = pd.to_numeric(tabla_fonasa["Días trabajados"], errors="coerce")
-        despues = pd.to_numeric(tabla_editada["Días trabajados"], errors="coerce")
-        correcciones = ~(
-            antes.eq(despues) | (antes.isna() & despues.isna())
-        )
-        if correcciones.any():
-            st.info(
-                f"{int(correcciones.sum())} valor(es) corregidos manualmente "
-                "contra el comprobante Fonasa. No son una certificación del sistema."
-            )
-            tabla_editada.loc[correcciones, "Observación"] = (
-                "Valor corregido manualmente; cotejar con anexo original"
-            )
         st.download_button(
-            "Descargar trabajadores Fonasa (Excel/CSV)",
-            data=tabla_editada.to_csv(index=False).encode("utf-8-sig"),
-            file_name="GALANT_Trabajadores_Fonasa.csv", mime="text/csv",
+            "Descargar lectura OCR original de Fonasa (CSV)",
+            data=tabla_fonasa.to_csv(index=False).encode("utf-8-sig"),
+            file_name="GALANT_Fonasa_lectura_original.csv",
+            mime="text/csv",
         )
+        # Las correcciones humanas tienen su propio editor y exportación.
+        with st.expander("Corregir manualmente días cotejados con el PDF"):
+            st.caption(
+                "Esta tabla NO modifica el resultado original del OCR. "
+                "Solo exporta correcciones humanas, identificadas como tales."
+            )
+            tabla_editada = st.data_editor(
+                tabla_fonasa,
+                hide_index=True, use_container_width=True,
+                num_rows="fixed",
+                disabled=[
+                    c for c in tabla_fonasa.columns if c != "Días trabajados"
+                ],
+                column_config={
+                    "Días trabajados": st.column_config.NumberColumn(
+                        "Días trabajados", min_value=0, max_value=31, step=1
+                    ),
+                },
+                key="edicion_manual_" + VERSION + "_" + reporte["firma"][:12],
+            )
+            antes = pd.to_numeric(
+                tabla_fonasa["Días trabajados"], errors="coerce"
+            )
+            despues = pd.to_numeric(
+                tabla_editada["Días trabajados"], errors="coerce"
+            )
+            correcciones = ~(
+                antes.eq(despues) | (antes.isna() & despues.isna())
+            )
+            if bool(correcciones.fillna(False).any()):
+                tabla_editada.loc[
+                    correcciones.fillna(False), "Observación"
+                ] = "Corregido manualmente contra PDF"
+                st.warning(
+                    f"{int(correcciones.fillna(False).sum())} corrección(es) "
+                    "humanas; no corresponden a la salida del OCR."
+                )
+            st.download_button(
+                "Descargar nómina con correcciones manuales (CSV)",
+                data=tabla_editada.to_csv(index=False).encode("utf-8-sig"),
+                file_name="GALANT_Fonasa_corregida_manualmente.csv",
+                mime="text/csv",
+            )
+        with st.expander("Diagnóstico verificable del OCR de Fonasa", expanded=False):
+            st.warning(
+                "El diagnóstico puede contener RUT y nombres de trabajadores. "
+                "No lo compartas públicamente."
+            )
+            st.json(reporte.get("entorno", {}))
+            trazas = []
+            for reg in reporte.get("nominas_fonasa", []):
+                for celda in reg.get("traza_dias", []):
+                    trazas.append({
+                        "Archivo": reg.get("archivo", ""),
+                        "Página": reg.get("pagina_fonasa"),
+                        "Rotación": reg.get("rotacion_fonasa"),
+                        "Trabajador": reg.get("trabajador_nombre"),
+                        "RUT": reg.get("trabajador_rut"),
+                        "Fila": celda.get("fila"),
+                        "OCR bruto": celda.get("ocr_bruto", "(sin dato)"),
+                        "Doble trazo 11": celda.get("dos_trazos", False),
+                        "Glifo cerrado": celda.get("glifo_cerrado", False),
+                        "Valor elegido": celda.get("valor"),
+                        "Regla": celda.get("metodo", "sin_regla"),
+                        "Recorte px": celda.get("celda_px"),
+                    })
+            if trazas:
+                st.dataframe(
+                    pd.DataFrame(trazas),
+                    hide_index=True, use_container_width=True,
+                )
+            else:
+                st.error(
+                    "El OCR no entregó trazabilidad de celdas. No afirmar "
+                    "que los días quedaron verificados."
+                )
+            pruebas = [
+                {
+                    "archivo": doc.get("archivo"),
+                    "sha256_pdf": doc.get("sha256_pdf"),
+                    "paginas": doc.get("paginas"),
+                    "paginas_ocr": doc.get("paginas_ocr"),
+                    "fonasa_paginas": [
+                        {
+                            "pagina": x.get("pagina"),
+                            "rotacion": x.get("rotacion"),
+                            "trabajadores": len(x.get("trabajadores", [])),
+                        } for x in doc.get("nomina_fonasa", [])
+                    ],
+                }
+                for doc in reporte.get("pagos_documentales", [])
+            ]
+            st.dataframe(
+                pd.DataFrame(pruebas), hide_index=True, use_container_width=True
+            )
+            paquete = {
+                "entorno": reporte.get("entorno", {}),
+                "documentos": pruebas,
+                "trazas": trazas,
+            }
+            st.download_button(
+                "Descargar diagnóstico completo (JSON privado)",
+                data=json.dumps(
+                    paquete, ensure_ascii=False, indent=2,
+                    default=str
+                ).encode("utf-8"),
+                file_name="GALANT_Diagnostico_Fonasa_Privado.json",
+                mime="application/json",
+            )
+            if trazas:
+                opciones = [
+                    (j, reg)
+                    for j, reg in enumerate(reporte.get("nominas_fonasa", []))
+                    if reg.get("traza_dias")
+                ]
+                elegido = st.selectbox(
+                    "Ver recorte original de los días (comprobación visual)",
+                    options=range(len(opciones)),
+                    format_func=lambda k: (
+                        opciones[k][1].get("trabajador_nombre", "Trabajador")
+                        + " · pág. "
+                        + str(opciones[k][1].get("pagina_fonasa"))
+                    ),
+                    key="visualizacion_dias_" + VERSION,
+                )
+                fila = opciones[elegido][1]
+                pdf_cargado = next(
+                    (u.getvalue() for u in archivos
+                     if u.name == fila.get("archivo")), None
+                )
+                traza_primaria = next(
+                    (x for x in fila.get("traza_dias", [])
+                     if x.get("valor") is not None and x.get("celda_px")),
+                    None,
+                )
+                if pdf_cargado and traza_primaria:
+                    try:
+                        with fitz.open(
+                            stream=pdf_cargado, filetype="pdf"
+                        ) as doc:
+                            pix = doc[fila["pagina_fonasa"] - 1].get_pixmap(
+                                matrix=fitz.Matrix(3, 3),
+                                colorspace=fitz.csGRAY, alpha=False,
+                            )
+                            from PIL import Image
+                            im = Image.frombytes(
+                                "L", (pix.width, pix.height), pix.samples
+                            )
+                            rot = fila.get("rotacion_fonasa") or 0
+                            if rot:
+                                im = im.rotate(rot, expand=True)
+                            x0, y0, x1, y1 = traza_primaria["celda_px"]
+                            margen = 30
+                            muestra = im.crop((
+                                max(0, x0 - margen),
+                                max(0, y0 - margen),
+                                min(im.width, x1 + margen),
+                                min(im.height, y1 + margen),
+                            ))
+                            st.image(
+                                muestra, width=320,
+                                caption="Recorte real en el servidor Streamlit",
+                            )
+                    except Exception:
+                        st.warning(
+                            "No se pudo renderizar la celda. Consultar "
+                            "el PDF original o descargar el diagnóstico."
+                        )
         ambiguos = sum(x.get("dias_requieren_revision", False)
                        for x in reporte.get("nominas_fonasa", []))
         if ambiguos:
