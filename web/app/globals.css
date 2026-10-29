@@ -1,0 +1,126 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap");
+:root { --ink:#152841; --muted:#718097; --navy:#122d4d; --blue:#3168df; --sky:#f5f8fd; --line:#e3eaf3; --white:#fff; }
+* {box-sizing:border-box}
+body {margin:0;background:#f6f8fc;color:var(--ink);font-family:"DM Sans",Arial,sans-serif;-webkit-font-smoothing:antialiased}
+button,input {font:inherit}
+button {cursor:pointer}
+button:disabled,.disabled {opacity:.55;cursor:not-allowed!important}
+.shell {max-width:1420px;padding:0 44px;margin:0 auto}
+.topbar {height:94px;display:flex;align-items:center;justify-content:space-between;gap:14px}
+.brand {display:flex;align-items:center;gap:12px}
+.brand-icon {height:46px;width:46px;display:grid;place-items:center;border-radius:13px;background:#193c6b;color:#fff}
+.brand strong {display:block;letter-spacing:.06em;font-family:"Plus Jakarta Sans",Arial,sans-serif;font-size:22px;font-weight:800}
+.brand small {display:block;color:#7e8a9c;font-size:11px;margin-top:2px}
+.top-actions {display:flex;gap:16px;align-items:center}
+.online {font-size:12px;color:#53725d;font-weight:700}
+.online-dot {display:inline-block;width:7px;height:7px;border-radius:50%;background:#2ab67d;margin-right:5px}
+.outline-btn {border:1px solid #dce5f0;background:#fff;border-radius:10px;font-size:13px;font-weight:700;color:#3e5674;padding:11px 17px}
+.outline-btn:hover {border-color:#a9c2ec;background:#f9fbff}
+.hero {background:linear-gradient(110deg,#102943 0%,#194b85 72%,#2464a2 100%);border-radius:22px;min-height:257px;padding:38px 48px;display:flex;align-items:center;justify-content:space-between;overflow:hidden;position:relative}
+.hero::before {content:"";position:absolute;width:340px;height:340px;border:1px solid rgba(255,255,255,.09);border-radius:50%;right:-52px;top:-84px}
+.hero::after {content:"";position:absolute;width:240px;height:240px;border:1px solid rgba(255,255,255,.09);border-radius:50%;right:0;top:-30px}
+.hero .eyebrow {color:#b0d1fb;font-size:11px;letter-spacing:.2em;font-weight:800;margin-bottom:16px}
+.hero h1 {font-family:"Plus Jakarta Sans",Arial,sans-serif;color:#fff;font-size:36px;line-height:1.2;letter-spacing:-.04em;margin:0 0 12px;font-weight:800}
+.hero h1 span {color:#a9cffb}
+.hero p {color:#d6e4f4;font-size:13px;line-height:1.8;max-width:580px;margin:0}
+.hero-mark {display:grid;place-items:center;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.065);height:152px;width:152px;flex-shrink:0;border-radius:42px;color:#d1e9ff;margin-right:80px;transform:rotate(-12deg)}
+.hero-mark svg {transform:rotate(12deg)}
+.section-heading {display:flex;justify-content:space-between;align-items:center;gap:15px;margin:32px 0 17px}
+.section-heading h2 {font-size:19px;font-weight:800;font-family:"Plus Jakarta Sans",Arial,sans-serif;letter-spacing:-.035em;margin:0}
+.section-heading p {color:var(--muted);font-size:12px;margin:6px 0 0}
+.stats {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.stat {background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;box-shadow:0 5px 18px rgba(30,68,112,.03)}
+.stat-icon {display:grid;place-items:center;width:40px;height:40px;border-radius:12px;margin-bottom:15px}
+.stat-icon.blue {background:#eaf1ff;color:#3368c9}
+.stat-icon.green {background:#e7f8f0;color:#289168}
+.stat-icon.amber {background:#fff3df;color:#b78226}
+.stat-icon.gray {background:#f1f4f7;color:#7891a7}
+.stat span {display:block;color:#8190a5;font-size:12px;margin-bottom:7px}
+.stat strong {font-family:"Plus Jakarta Sans",Arial,sans-serif;font-size:30px;font-weight:800;color:#17314f}
+.uploads-title {margin-top:36px}
+.helper {font-size:12px;color:#8292a5}
+.upload-grid {display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.upload-card {background:#fff;border:1px solid var(--line);border-radius:17px;padding:28px;min-height:226px;position:relative;box-shadow:0 5px 18px rgba(30,68,112,.025)}
+.upload-icon {width:46px;height:46px;border-radius:13px;display:grid;place-items:center;background:#eaf1ff;color:#3165ba;margin-bottom:14px}
+.upload-card:nth-child(2) .upload-icon {background:#eaf6f0;color:#2b866b}
+.upload-card h3 {margin:0 0 8px;font-size:16px;font-family:"Plus Jakarta Sans",Arial,sans-serif;letter-spacing:-.025em}
+.upload-card p {max-width:550px;font-size:12px;color:#76869b;line-height:1.65;margin:0 0 16px}
+.upload-button {display:inline-block;padding:11px 18px;color:#fff;border-radius:9px;background:#2f67d8;cursor:pointer;font-size:12px;font-weight:700}
+.upload-button:hover {background:#2455b4}
+.upload-button.secondary {background:#eef5ff;color:#2459ac}
+.upload-button.secondary:hover {background:#e2edfe}
+.upload-card input[type=file] {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.upload-card input[type=file]:focus-visible + label {outline:3px solid #5587ff}
+.message {background:#edf4ff;color:#274d84;border:1px solid #c8dcf5;border-radius:11px;padding:13px 18px;font-size:13px;line-height:1.6}
+.status-message {margin-top:18px}
+.data-section {padding-bottom:24px}
+.tabs {display:flex;gap:3px;padding:4px;border:1px solid #e2e9f1;background:#fff;border-radius:11px}
+.tabs button {background:transparent;border:0;color:#74849a;font-weight:700;font-size:12px;padding:10px 14px;border-radius:8px}
+.tabs button.active {background:#e9f1ff;color:#2858af}
+.table-container {background:#fff;border:1px solid var(--line);border-radius:15px;overflow:auto;box-shadow:0 4px 18px rgba(31,65,102,.03)}
+table {border-collapse:collapse;width:100%;min-width:820px;text-align:left}
+th {font-size:11px;color:#8795a8;background:#fbfcff;text-transform:uppercase;letter-spacing:.045em;padding:16px 17px;border-bottom:1px solid var(--line)}
+td {padding:17px;font-size:12px;color:#40546d;border-bottom:1px solid #edf1f7;vertical-align:top}
+tr:last-child td {border-bottom:0}
+.filename {font-size:12px;color:#1e3857;max-width:260px;display:block;overflow-wrap:anywhere}
+.muted {display:block;margin-top:6px;color:#9aa7b4;font-size:11px}
+.status {display:inline-block;white-space:nowrap;border-radius:7px;padding:7px 10px;font-size:11px;font-weight:700}
+.status.pendiente {color:#8e6d27;background:#fff5e6}
+.status.procesando {color:#3066aa;background:#eaf3ff}
+.status.completado {color:#258463;background:#e7f8ef}
+.status.requiere_revision {color:#a96c22;background:#fff1d9}
+.status.error {color:#ae3a47;background:#feeaeb}
+.evidence-text {font-size:11px;font-weight:600}
+.receipt-details {margin-top:9px;color:#446a9b;max-width:360px}
+.receipt-details summary {cursor:pointer;font-size:11px}
+.receipt-details ul {margin:10px 0 0;padding-left:18px;color:#51667c;line-height:1.7}
+.row-error {font-size:11px;color:#a54b53}
+.empty {padding:37px;text-align:center;color:#94a0b0}
+footer {display:flex;align-items:center;gap:8px;font-size:11px;color:#8997aa;border-top:1px solid #e6ebf3;padding:23px 0 45px}
+.login-wrap {min-height:calc(100vh - 160px);display:grid;grid-template-columns:1.2fr .85fr;gap:60px;align-items:center;padding:56px 5% 100px}
+.login-copy .eyebrow {display:block;font-size:11px;letter-spacing:.18em;color:#4474b8;font-weight:800;margin-bottom:20px;text-transform:uppercase}
+.login-copy h1 {max-width:750px;font-family:"Plus Jakarta Sans",Arial,sans-serif;font-size:clamp(34px,4vw,57px);letter-spacing:-.055em;line-height:1.13;margin:0 0 24px}
+.login-copy h1 em {font-style:normal;color:#386bca}
+.login-copy p {line-height:1.75;color:#7d8b9e;max-width:570px;font-size:15px}
+.trust-row {display:flex;align-items:center;gap:8px;color:#366082;font-size:13px;margin-top:33px}
+.login-card {background:#fff;border:1px solid #e1e8f3;border-radius:21px;padding:35px;box-shadow:0 20px 55px rgba(23,54,90,.07)}
+.small-illustration {display:grid;place-items:center;height:50px;width:50px;background:#edf4ff;color:#3067c4;border-radius:13px;margin-bottom:18px}
+.login-card h2 {font-family:"Plus Jakarta Sans",Arial,sans-serif;margin:0 0 10px;font-size:23px}
+.login-card p {font-size:13px;color:#8a98aa;line-height:1.7;margin:0 0 26px}
+.login-card label {display:block;font-size:12px;color:#344963;font-weight:700;margin-bottom:10px}
+.login-card input {height:47px;border:1px solid #d9e1ed;border-radius:9px;background:#fcfdff;width:100%;padding:0 13px;margin-bottom:18px;outline:0}
+.login-card input:focus {border-color:#4b86e1;box-shadow:0 0 0 3px #d7e7ff}
+.primary-btn {background:#326adb;color:#fff;border:0;border-radius:9px;padding:14px;width:100%;font-size:13px;font-weight:800}
+.primary-btn:hover {background:#275bc1}
+.login-card .message {margin-top:15px}
+.notice {margin:18vh auto;max-width:560px;padding:33px;background:white;border:1px solid #e1e9f2;border-radius:16px;line-height:1.6}
+.notice h1 {margin:0 0 12px}
+.notice h2 {font-size:20px}
+.loading {padding:100px 0;text-align:center;color:#8795a8}
+@media(max-width:1050px) {
+  .shell {padding:0 24px}
+  .hero-mark {margin-right:16px}
+  .stats {grid-template-columns:repeat(2,1fr)}
+  .login-wrap {gap:25px;padding:36px 0 80px}
+}
+@media(max-width:720px) {
+  .shell {padding:0 16px}
+  .topbar {height:78px}
+  .brand strong {font-size:19px}
+  .brand small {font-size:9px}
+  .online {display:none}
+  .hero {padding:28px 26px;min-height:235px}
+  .hero h1 {font-size:27px}
+  .hero-mark {display:none}
+  .section-heading {align-items:flex-start;flex-direction:column;margin-top:27px}
+  .stats {gap:10px}
+  .stat {padding:15px}
+  .stat strong {font-size:25px}
+  .upload-grid {grid-template-columns:1fr;gap:12px}
+  .upload-card {padding:24px;min-height:205px}
+  .login-wrap {grid-template-columns:1fr;gap:25px;padding:25px 0 60px}
+  .login-copy h1 {font-size:35px}
+  .login-card {padding:25px}
+  .tabs {width:100%;justify-content:space-between}
+  .tabs button {padding:9px 7px}
+}

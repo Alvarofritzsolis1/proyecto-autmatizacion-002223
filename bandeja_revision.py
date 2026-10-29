@@ -45,8 +45,20 @@ def _detalle_revision(texto: str) -> tuple[str, str]:
             "Lectura pendiente",
             "Revisar las filas no reconocidas del PDF. No significa deuda ni RUT inválido."
         )
-    if re.search(r"r[uú]t.*(?:invalido|inv[aá]lido|d[ií]gito verificador)", k):
-        return ("RUT sin validación", "Cotejar RUT con el original y corregir OCR si corresponde.")
+    if re.search(
+        r"r[uú]t del (?:contratista|trabajador) inv[aá]lido", k
+    ) or re.search(r"r[uú]t.*d[ií]gito verificador", k):
+        return (
+            "RUT con dígito verificador incorrecto",
+            "Revisar el RUT específico indicado en el documento; no atribuir "
+            "un error del contratista al trabajador."
+        )
+    if "falta el rut del contratista" in k or "contratista_rut" in k:
+        return (
+            "RUT del contratista no identificado",
+            "Recuperar el RUT del empleador desde el encabezado de la planilla; "
+            "el RUT del trabajador puede ser correcto."
+        )
     if "duplicad" in k:
         return ("Posible duplicado", "Revisar archivos y movimientos: no sumar dos veces una misma fila.")
     if "faltan" in k or "falta " in k or "ilegible" in k or "ocr" in k:
@@ -60,15 +72,41 @@ def _detalle_revision(texto: str) -> tuple[str, str]:
     return ("Observación documental", "Revisar la evidencia indicada antes de emitir una conclusión.")
 
 
+def _separar_cobertura_ocr(texto: str) -> tuple[str, list[str]]:
+    """Agrupa advertencias OCR globales sin borrar los problemas por trabajador.
+
+    Una página ilegible no debe convertirse en cuatro alertas independientes
+    si hay cuatro trabajadores en la misma nómina.
+    """
+    patron = re.compile(
+        r"(?:Conflicto entre tablas del PDF:\s*)?"
+        r"Revisi[oó]n cobertura OCR:\s*(p\.?\s*\d+)"
+        r"\s*:\s*([^;]*)(?:;\s*)?", re.I
+    )
+    fragmentos = [
+        f"{m.group(1).replace(' ', '')}: {m.group(2).strip()}"
+        for m in patron.finditer(texto)
+    ]
+    limpio = patron.sub("", texto)
+    limpio = re.sub(r";\s*;", "; ", limpio).strip(" ;")
+    return limpio, list(dict.fromkeys(fragmentos))
+
+
 def generar_bandeja(
     certificados=None, incidencias=None, detalle=None, log=None,
     cruce_detalle=None, cruce_resumen=None, errores=None, duplicados=None,
+    pagos_documentales=None,
 ) -> pd.DataFrame:
     """Construye cola deduplicada de hallazgos sin crear conformidades nuevas."""
     certificados = certificados or []
     incidencias = incidencias or []
     errores = errores or []
     duplicados = duplicados or []
+    pagos_documentales = pagos_documentales or []
+    pagos_por_archivo = {
+        str(doc.get("archivo", "")): doc
+        for doc in pagos_documentales if doc.get("archivo")
+    }
     filas = []
     claves = set()
 
@@ -140,11 +178,25 @@ def generar_bandeja(
 
     if detalle is not None and not detalle.empty:
         for _, fila in detalle.iterrows():
-            motivo = _valor(fila.get("motivo_revision"))
+            motivo_original = _valor(fila.get("motivo_revision"))
+            motivo, coberturas = _separar_cobertura_ocr(motivo_original)
+            for cobertura in coberturas:
+                agregar(
+                    "MEDIA", "Cobertura OCR (avanzado)",
+                    f"Lectura de nómina pendiente: {cobertura}",
+                    "Revisar esta página solo para cuadratura detallada. "
+                    "No implica que las cotizaciones estén impagas.",
+                    archivo=fila.get("archivo_origen", ""),
+                    pagina=cobertura.split(":", 1)[0],
+                    contratista=fila.get("contratista_nombre", ""),
+                    periodo=fila.get("periodo_remuneracion", ""),
+                )
+            if not motivo:
+                continue  # No multiplicar un aviso global por cada RUT válido.
             estado = _valor(fila.get("estado_auditoria"))
             problema, accion = _detalle_revision(motivo)
             prioridad = "ALTA" if estado.startswith("ALERTA") else "MEDIA"
-            if "RUT sin validación" == problema:
+            if problema == "RUT con dígito verificador incorrecto":
                 prioridad = "ALTA"
             if problema == "Lectura pendiente":
                 # Un problema de extracción del ARCHIVO no debe aparecer como
@@ -205,12 +257,35 @@ def generar_bandeja(
 
     if log is not None and not log.empty:
         for _, item in log.iterrows():
-            if _valor(item.get("resultado")).upper() == "ERROR":
-                agregar("ALTA", "Archivo",
-                        "No se procesó correctamente un documento.",
-                        _valor(item.get("detalle"))[:350] or
-                        "Revisar formato, integridad y legibilidad del archivo.",
-                        archivo=item.get("archivo", ""))
+            if _valor(item.get("resultado")).upper() != "ERROR":
+                continue
+            archivo = _valor(item.get("archivo", ""))
+            respaldo = pagos_por_archivo.get(archivo, {})
+            comprobantes = respaldo.get("comprobantes", [])
+            evidencia = any(
+                c.get("fecha_pago") and c.get("periodo")
+                and c.get("estado") == "PAGO_RESPALDADO_EN_DOCUMENTO"
+                for c in comprobantes
+            )
+            if evidencia:
+                agregar(
+                    "MEDIA", "Auditoría avanzada",
+                    "No se pudo reconstruir la nómina; sí se leyó al menos un "
+                    "comprobante de pago. El documento puede estar incompleto.",
+                    "Revisar pagos por institución y período en la tabla principal. "
+                    "La falta de filas de trabajadores no demuestra impago. "
+                    + _valor(item.get("detalle"))[:180],
+                    archivo=archivo,
+                )
+            else:
+                agregar(
+                    "ALTA", "Archivo",
+                    "No se pudo procesar el documento ni obtener respaldo suficiente "
+                    "en esta revisión.",
+                    _valor(item.get("detalle"))[:350] or
+                    "Revisar formato, integridad y legibilidad del archivo.",
+                    archivo=archivo,
+                )
     for error in errores:
         agregar("ALTA", "Archivo", "Falló un grupo de documentos.",
                 _valor(error)[:350])

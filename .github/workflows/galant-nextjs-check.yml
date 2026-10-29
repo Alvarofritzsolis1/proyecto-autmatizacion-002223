@@ -1,0 +1,31 @@
+name: GALANT web - build de validación
+on:
+  push:
+    branches:
+      - feature/galant-vercel-supabase
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/galant-nextjs-check.yml'
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Instalar dependencias
+        run: npm install --no-audit --no-fund
+      - name: Revisar tipos
+        run: npm run typecheck
+      - name: Compilar aplicación Next.js
+        run: npm run build
