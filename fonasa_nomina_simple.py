@@ -313,6 +313,7 @@ def _tipo_salud(texto):
         "Esencial": "esencial", "Fundación": "fundacion",
         "Cruz del Norte": "cruz del norte",
     }
+    limpio = limpio.replace("cruzblanca", "cruz blanca").replace("vidatres", "vida tres")
     tiene_salud = (
         "isapre" in limpio or
         ("cotizaciones" in limpio and "salud" in limpio)
