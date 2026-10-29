@@ -42,7 +42,7 @@ def _grupos(numeros, salto=2):
     return [int(round(np.median(g))) for g in grupos]
 
 
-def _reticula(imagen):
+def _reticula(imagen, max_salto_fila=34):
     """Detecta filas y columnas SIN intentar interpretar montos de AFP o mutual."""
     ar = np.asarray(imagen)
     inv = cv2.threshold(
@@ -63,7 +63,7 @@ def _reticula(imagen):
     for i in range(len(ys)):
         secuencia = [ys[i]]
         for y in ys[i + 1:]:
-            if 12 <= y - secuencia[-1] <= 34:
+            if 12 <= y - secuencia[-1] <= max_salto_fila:
                 secuencia.append(y)
             else:
                 break
@@ -352,6 +352,69 @@ def _cabecera_salud(pagina, orientacion):
     )
 
 
+def _nomina_de_imagen_isapre(imagen):
+    """Lee RUT y nombre en planilla Isapre; NO supone que contenga días.
+
+    El formato oficial de Isapres tiene un campo amplio para apellidos/nombres
+    y columnas de REMUNERACIÓN y COTIZACIÓN, que no deben confundirse con días.
+    Cada afiliado recuperado se incluye aunque sus días queden pendientes.
+    """
+    geomet = _reticula(imagen, max_salto_fila=85)
+    if not geomet:
+        return []
+    filas, columnas = geomet
+    if len(columnas) < 6:
+        return []
+    # Columna 1: RUT; la siguiente es número de FUN o código interno.
+    rut_col = _ocr_columna(imagen, filas, columnas[1], columnas[2])
+    # En planilla Isapre los tres nombres pueden compartir una celda grande;
+    # en otras versiones se distribuyen en dos o tres celdas.
+    col_nombre = _ocr_columna(imagen, filas, columnas[3], columnas[4])
+    if len(columnas) >= 7:
+        col_nombre_2 = _ocr_columna(imagen, filas, columnas[4], columnas[5])
+    else:
+        col_nombre_2 = {}
+    encontrados = {}
+    for i in range(len(filas) - 1):
+        rut = normalizar_rut(rut_col.get(i, ""))
+        if not rut:
+            continue
+        nombre = " ".join(
+            x for x in (
+                col_nombre.get(i, ""), col_nombre_2.get(i, "")
+            ) if x.strip()
+        )
+        nombre = " ".join(re.sub(
+            r"[^A-Za-zÁÉÍÓÚÑÜáéíóúñü\s]", " ", nombre
+        ).upper().split())
+        if len(nombre.split()) < 2:
+            # No confundir letras de columnas de renta/cotización con nombres.
+            continue
+        if rut not in encontrados:
+            encontrados[rut] = {
+                "trabajador_nombre": nombre,
+                "trabajador_rut": rut,
+                "dias_trabajados_fonasa": None,
+                "dias_requieren_revision": True,
+                "filas_movimientos": 1,
+                "traza_dias": [{
+                    "fila": i + 1, "ocr_bruto": "",
+                    "valor": None,
+                    "metodo": "dias_no_informados_en_planilla_isapre",
+                }],
+                "metodo_dias": "no_informado_en_isapre",
+                "observacion_dias": (
+                    "Planilla Isapre no incluye días trabajados; "
+                    "cotejar con respaldo de AFP u otra planilla que "
+                    "identifique el mismo RUT y período."
+                ),
+                "fuente": "Isapre — detalle de afiliados",
+            }
+        else:
+            encontrados[rut]["filas_movimientos"] += 1
+    return list(encontrados.values())
+
+
 def _es_anexo_fonasa(pagina, orientacion):
     """Devuelve el tipo de salud (truthy) para evitar segundo OCR del título."""
     return _tipo_salud(_cabecera_salud(pagina, orientacion))
@@ -414,7 +477,11 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18,
             im = Image.frombytes("L", (pix.width, pix.height), pix.samples)
             if orientacion:
                 im = im.rotate(orientacion, expand=True)
-            filas = _nomina_de_imagen(im)
+            filas = (
+                _nomina_de_imagen_isapre(im)
+                if tipo.startswith("Isapre")
+                else _nomina_de_imagen(im)
+            )
             if filas:
                 # Institución leída EN LA MISMA PÁGINA de salud. No asignar
                 # Fonasa por defecto a una persona adscrita a Isapre.
