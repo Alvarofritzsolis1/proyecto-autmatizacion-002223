@@ -83,3 +83,38 @@ def test_documento_nominal_f30_no_es_f301_por_nombre():
         "Periodo 09/2026",
     ])
     assert es_f301(pdf,"contratista_F30.pdf") is False
+
+def test_ocr_misspelling_electronico_is_still_document_candidate():
+    from pago_documental import _interpretar
+    text = (
+        "DETALLE DE PAGO DE COTIZACIONES PREVISIONALES "
+        "Numero de Folio: 2006260700834385 "
+        "Periodo de Remuneraciones: 07/2026 "
+        "Pago Electrénico 06/08/2026 PREVIRED"
+    )
+    found = _interpretar(text, 1, "OCR")
+    assert found is not None
+    assert found["periodo"] == "2026-07"
+    # La etiqueta mal escrita no puede ocultar el documento, pero el pago
+    # sigue necesitando validación independiente de la fecha.
+    assert found["folio"] == "2006260700834385"
+
+
+def test_no_inferir_pago_desde_fecha_declaracion():
+    from pago_documental import _interpretar
+    text = (
+        "COMPROBANTE DE DECLARACION Y NO PAGO "
+        "DE COTIZACIONES PREVISIONALES PREVIRED "
+        "Numero de Folio: 2005202609547098 "
+        "Periodo 09/2026 "
+        "Fecha Declaracion: 01/10/2026"
+    )
+    found = _interpretar(text, 1, "PDF")
+    assert found["fecha_pago"] == ""
+    assert found["estado"] == "DECLARACION_SIN_PAGO_IDENTIFICADO"
+
+
+def test_periodo_no_se_toma_de_fecha_pago():
+    from pago_documental import _periodo
+    text = "Pago Electronico 20/10/2026, Periodo de Remuneraciones: 09/2026"
+    assert _periodo(text) == "2026-09"
