@@ -57,7 +57,7 @@ def test_runtime_shows_real_code_and_uploaded_pdf_fingerprints():
     assert "def _huella_motor():" in codigo
     assert 'hashlib.sha256(fuente.read_bytes())' in codigo
     assert 'evidencia["sha256_pdf"]' in codigo
-    assert '"tesseract": str(pytesseract.get_tesseract_version())' in codigo
+    assert '"tesseract": _version_tesseract()' in codigo
 
 
 def test_ocr_output_not_overwritten_by_manual_editor():
