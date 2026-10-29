@@ -172,32 +172,51 @@ def _grafia_celda_dias(imagen, x0, x1, y0, y1):
     return doble_uno, glifo_con_hueco
 
 
-def _dias_celda(imagen, x0, x1, y0, y1):
-    """Lee días sin inventar valores positivos desde movimientos con cero.
+def _dias_celda(imagen, x0, x1, y0, y1, diagnostico=None):
+    """Lee días con traza verificable, sin OCR adicional cuando se activa el diagnóstico.
 
-    El valor None no significa impago; significa cero/no corroborado.
+    Una cifra sin confirmar NO se traduce a cero. Si Tesseract contradice la
+    forma geométrica, registrar ambas lecturas para revisión en Streamlit.
     """
     doble_uno, glifo_con_hueco = _grafia_celda_dias(
         imagen, x0, x1, y0, y1
     )
+    bruto = ""
+    metodo = "sin_lectura"
+    valor = None
     if doble_uno:
-        return 11
-    from PIL import ImageOps
-    recorte = imagen.crop((x0 + 9, y0 + 1, x1 - 7, y1 - 1))
-    recorte = ImageOps.expand(recorte, border=10, fill=255)
-    texto = pytesseract.image_to_string(
-        recorte, lang="eng",
-        config="--psm 7 -c tessedit_char_whitelist=0123456789",
-        timeout=4
-    ).strip()
-    if texto.isdigit() and 0 <= int(texto) <= 31:
-        if int(texto) == 0:
-            return None  # Movimiento con 0 días: no se agrega ni duplica.
-        if glifo_con_hueco and texto in {"1", "2", "7"}:
-            return None  # Forma contradictoria: no inventar 2 días.
-        return int(texto)
-    return None
-
+        valor = 11
+        metodo = "dos_trazos_geometricos"
+        # No se ejecuta Tesseract otra vez: la evidencia es la propia forma.
+    else:
+        from PIL import ImageOps
+        recorte = imagen.crop((x0 + 9, y0 + 1, x1 - 7, y1 - 1))
+        recorte = ImageOps.expand(recorte, border=10, fill=255)
+        bruto = pytesseract.image_to_string(
+            recorte, lang="eng",
+            config="--psm 7 -c tessedit_char_whitelist=0123456789",
+            timeout=4
+        ).strip()
+        if bruto.isdigit() and 0 <= int(bruto) <= 31:
+            if int(bruto) == 0:
+                metodo = "movimiento_cero"
+            elif glifo_con_hueco and bruto in {"1", "2", "7"}:
+                metodo = "rechazado_por_grafia_cerrada"
+            else:
+                valor = int(bruto)
+                metodo = "ocr_numero"
+        elif bruto:
+            metodo = "texto_no_numerico"
+    if diagnostico is not None:
+        diagnostico.update({
+            "ocr_bruto": bruto if not doble_uno else "(no requerido)",
+            "dos_trazos": bool(doble_uno),
+            "glifo_cerrado": bool(glifo_con_hueco),
+            "valor": valor,
+            "metodo": metodo,
+            "celda_px": [int(x0), int(y0), int(x1), int(y1)],
+        })
+    return valor
 
 def _nomina_de_imagen(imagen):
     geomet = _reticula(imagen)
@@ -232,11 +251,19 @@ def _nomina_de_imagen(imagen):
         if not nombre or not apellido_paterno:
             continue
         valores_dias = []
+        trazas = []
         for i in indices:
             y0, y1 = filas[i:i + 2]
+            diagnostico = {"fila": int(i) + 1}
             dia = _dias_celda(
-                imagen, columnas[5], columnas[6], y0, y1
+                imagen, columnas[5], columnas[6], y0, y1,
+                diagnostico=diagnostico,
             )
+            # El test de lectura simulada puede devolver un valor sin rellenar
+            # diagnostico. Nunca ocultar cuál fue el valor utilizado.
+            diagnostico.setdefault("valor", dia)
+            diagnostico.setdefault("metodo", "lectura")
+            trazas.append(diagnostico)
             if dia is not None:
                 valores_dias.append(dia)
         # Si existen dos filas con días positivos, pueden representar
@@ -253,6 +280,14 @@ def _nomina_de_imagen(imagen):
             "dias_trabajados_fonasa": dias_confirmados,
             "dias_requieren_revision": dias_confirmados is None,
             "filas_movimientos": len(indices),
+            "traza_dias": trazas,
+            "metodo_dias": (
+                next(
+                    (x.get("metodo", "sin_traza") for x in trazas
+                     if x.get("valor") == dias_confirmados),
+                    "sin_traza",
+                ) if dias_confirmados is not None else "requiere_revision"
+            ),
             "fuente": "Fonasa — anexo de detalle",
         })
     return salida
@@ -315,5 +350,9 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18):
                 im = im.rotate(orientacion, expand=True)
             filas = _nomina_de_imagen(im)
             if filas:
-                salida.append({"pagina": idx + 1, "trabajadores": filas})
+                salida.append({
+                    "pagina": idx + 1, "trabajadores": filas,
+                    "rotacion": int(orientacion),
+                    "tamano_imagen_px": [int(im.width), int(im.height)],
+                })
     return salida
