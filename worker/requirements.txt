@@ -1,2 +1,5 @@
 -r ../requirements.txt
 supabase>=2.0,<3
+
+# Se invoca solo si GALANT_VISION_ENABLED=true.
+google-cloud-vision>=3.7,<4
