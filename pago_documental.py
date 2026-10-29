@@ -134,7 +134,7 @@ def _ocr_portada(pagina, orientacion_previa=None):
     from PIL import Image
     import pytesseract
     from collections import OrderedDict
-    pix=pagina.get_pixmap(matrix=fitz.Matrix(1.8,1.8),
+    pix=pagina.get_pixmap(matrix=fitz.Matrix(1.9,1.9),
                           colorspace=fitz.csGRAY,alpha=False)
     im=Image.frombytes("L",(pix.width,pix.height),pix.samples)
     opciones=([orientacion_previa] if orientacion_previa is not None else [])
