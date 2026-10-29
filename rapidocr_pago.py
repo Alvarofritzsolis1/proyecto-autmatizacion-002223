@@ -33,9 +33,11 @@ def _motor():
 
 
 def _lineas(resultado, ancho: int, alto: int) -> list[dict]:
-    textos = list(getattr(resultado, "txts", None) or [])
+    raw_textos = getattr(resultado, "txts", None)
+    textos = list(raw_textos) if raw_textos is not None else []
     cajas = getattr(resultado, "boxes", None)
-    confianzas = list(getattr(resultado, "scores", None) or [])
+    raw_confianzas = getattr(resultado, "scores", None)
+    confianzas = list(raw_confianzas) if raw_confianzas is not None else []
     if cajas is None:
         return []
     salida = []
