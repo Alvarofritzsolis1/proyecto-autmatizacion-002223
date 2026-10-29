@@ -122,18 +122,79 @@ def _nombres(columna, indices):
     return Counter(opciones).most_common(1)[0][0] if opciones else ""
 
 
+def _grafia_celda_dias(imagen, x0, x1, y0, y1):
+    """Corroboración geométrica para dígitos borrosos, sin asumir montos.
+
+    En la planilla Fonasa escaneada, Tesseract interpretaba "11" como
+    "2"/vacío y varias celdas "0" como "2". Esas lecturas creaban
+    falsos días y anulaban el trabajador por conflicto.
+    Solo confirmamos 11 si hay DOS trazos estrechos y similares.
+    Un glifo cerrado (0/6/8/9) NO puede aceptarse como 1, 2 o 7.
+    """
+    alto = y1 - y0
+    margen_y = max(2, round(alto * .12))
+    margen_x = max(5, round(alto * .44))
+    if x1 - x0 < 2 * margen_x + 10 or alto < 2 * margen_y + 7:
+        return False, False
+    region = np.asarray(imagen.convert("L").crop(
+        (x0 + margen_x, y0 + margen_y, x1 - margen_x, y1 - margen_y)
+    ))
+    if not region.size:
+        return False, False
+    tinta = cv2.threshold(
+        region, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )[1]
+    n, _, componentes, _ = cv2.connectedComponentsWithStats(tinta)
+    glifos = []
+    for k in range(1, n):
+        x, y, ancho, altura, area = map(int, componentes[k])
+        if (area < max(5, alto * .20)
+                or altura < max(5, alto * .28)
+                or ancho > alto * 1.15):
+            continue
+        mascara = tinta[y:y + altura, x:x + ancho]
+        _, jerarquia = cv2.findContours(
+            mascara, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+        )
+        huecos = sum(
+            1 for c in (jerarquia[0] if jerarquia is not None else [])
+            if c[3] >= 0
+        )
+        glifos.append((x, y, ancho, altura, area, huecos))
+    glifos.sort(key=lambda c: c[0])
+    doble_uno = (
+        len(glifos) == 2
+        and all(c[2] / c[3] <= .55 and c[5] == 0 for c in glifos)
+        and abs(glifos[0][1] - glifos[1][1]) < max(4, alto * .2)
+        and .5 <= glifos[0][4] / glifos[1][4] <= 2.0
+    )
+    glifo_con_hueco = len(glifos) == 1 and glifos[0][5] >= 1
+    return doble_uno, glifo_con_hueco
+
+
 def _dias_celda(imagen, x0, x1, y0, y1):
-    """Fallar cerrado: OCR de '11' ambiguo no debe interpretarse como 1."""
-    recorte = imagen.crop((x0 + 9, y0 + 1, x1 - 7, y1 - 1))
-    # PSM 7 sin letras; no convertir automáticamente valores ambiguos.
+    """Lee días sin inventar valores positivos desde movimientos con cero.
+
+    El valor None no significa impago; significa cero/no corroborado.
+    """
+    doble_uno, glifo_con_hueco = _grafia_celda_dias(
+        imagen, x0, x1, y0, y1
+    )
+    if doble_uno:
+        return 11
     from PIL import ImageOps
+    recorte = imagen.crop((x0 + 9, y0 + 1, x1 - 7, y1 - 1))
     recorte = ImageOps.expand(recorte, border=10, fill=255)
     texto = pytesseract.image_to_string(
         recorte, lang="eng",
         config="--psm 7 -c tessedit_char_whitelist=0123456789",
         timeout=4
     ).strip()
-    if texto.isdigit() and 1 <= int(texto) <= 31:
+    if texto.isdigit() and 0 <= int(texto) <= 31:
+        if int(texto) == 0:
+            return None  # Movimiento con 0 días: no se agrega ni duplica.
+        if glifo_con_hueco and texto in {"1", "2", "7"}:
+            return None  # Forma contradictoria: no inventar 2 días.
         return int(texto)
     return None
 
