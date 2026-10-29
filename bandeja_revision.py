@@ -95,12 +95,18 @@ def _separar_cobertura_ocr(texto: str) -> tuple[str, list[str]]:
 def generar_bandeja(
     certificados=None, incidencias=None, detalle=None, log=None,
     cruce_detalle=None, cruce_resumen=None, errores=None, duplicados=None,
+    pagos_documentales=None,
 ) -> pd.DataFrame:
     """Construye cola deduplicada de hallazgos sin crear conformidades nuevas."""
     certificados = certificados or []
     incidencias = incidencias or []
     errores = errores or []
     duplicados = duplicados or []
+    pagos_documentales = pagos_documentales or []
+    pagos_por_archivo = {
+        str(doc.get("archivo", "")): doc
+        for doc in pagos_documentales if doc.get("archivo")
+    }
     filas = []
     claves = set()
 
@@ -251,12 +257,35 @@ def generar_bandeja(
 
     if log is not None and not log.empty:
         for _, item in log.iterrows():
-            if _valor(item.get("resultado")).upper() == "ERROR":
-                agregar("ALTA", "Archivo",
-                        "No se procesó correctamente un documento.",
-                        _valor(item.get("detalle"))[:350] or
-                        "Revisar formato, integridad y legibilidad del archivo.",
-                        archivo=item.get("archivo", ""))
+            if _valor(item.get("resultado")).upper() != "ERROR":
+                continue
+            archivo = _valor(item.get("archivo", ""))
+            respaldo = pagos_por_archivo.get(archivo, {})
+            comprobantes = respaldo.get("comprobantes", [])
+            evidencia = any(
+                c.get("fecha_pago") and c.get("periodo")
+                and c.get("estado") == "PAGO_RESPALDADO_EN_DOCUMENTO"
+                for c in comprobantes
+            )
+            if evidencia:
+                agregar(
+                    "MEDIA", "Auditoría avanzada",
+                    "No se pudo reconstruir la nómina; sí se leyó al menos un "
+                    "comprobante de pago. El documento puede estar incompleto.",
+                    "Revisar pagos por institución y período en la tabla principal. "
+                    "La falta de filas de trabajadores no demuestra impago. "
+                    + _valor(item.get("detalle"))[:180],
+                    archivo=archivo,
+                )
+            else:
+                agregar(
+                    "ALTA", "Archivo",
+                    "No se pudo procesar el documento ni obtener respaldo suficiente "
+                    "en esta revisión.",
+                    _valor(item.get("detalle"))[:350] or
+                    "Revisar formato, integridad y legibilidad del archivo.",
+                    archivo=archivo,
+                )
     for error in errores:
         agregar("ALTA", "Archivo", "Falló un grupo de documentos.",
                 _valor(error)[:350])
