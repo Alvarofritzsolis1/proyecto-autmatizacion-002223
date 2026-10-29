@@ -14,7 +14,7 @@ from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 
-VERSION = "18.4"
+VERSION = "18.5-RapidOCR-preview"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -52,6 +52,15 @@ with st.expander("Configuración opcional", expanded=False):
         value=False,
         help="Lee hasta 20 páginas candidatas por PDF. Aumenta la cobertura, pero tarda más.",
     )
+    usar_rapidocr = st.checkbox(
+        "OCR de rescate mejorado (RapidOCR, gratuito)",
+        value=True,
+        help=(
+            "Usa un segundo OCR local solo en páginas escaneadas con datos de "
+            "pago, fecha, período o folio incompletos. No sube PDF a otro servicio. "
+            "Puede aumentar el tiempo por documento."
+        ),
+    )
     a, b = st.columns(2)
     with a:
         tolerancia = st.number_input(
@@ -88,6 +97,7 @@ def _firma_actual():
     h.update(str(bool(incluir_mutual)).encode())
     h.update(str(bool(modo_avanzado)).encode())
     h.update(str(bool(lectura_ampliada)).encode())
+    h.update(str(bool(usar_rapidocr)).encode())
     return h.hexdigest()
 
 if st.button(
@@ -128,7 +138,10 @@ if st.button(
         def _leer_pago_trabajo(data, nombre):
             t = time.perf_counter()
             resultado = analizar_pago_pdf(
-                data, nombre, max_paginas_ocr=20 if lectura_ampliada else 6
+                data, nombre,
+                max_paginas_ocr=20 if lectura_ampliada else 6,
+                usar_rapidocr=usar_rapidocr,
+                max_paginas_rapidocr=3 if lectura_ampliada else 2,
             )
             return resultado, time.perf_counter() - t
 
@@ -143,6 +156,7 @@ if st.button(
                 clave_cache = (
                     VERSION + ":" + hashlib.sha256(data).hexdigest()
                     + ":" + str(lectura_ampliada)
+                    + ":" + str(usar_rapidocr)
                 )
                 if clave_cache in cache_sesion:
                     recibos_ordenados[i] = (
@@ -175,6 +189,12 @@ if st.button(
                 "Segundos": round(segundos, 2),
                 "Páginas": evidencia["paginas"],
                 "Páginas con OCR": evidencia["paginas_ocr"],
+                "Páginas rescate RapidOCR": len(
+                    evidencia.get("rapidocr", {}).get("paginas", [])
+                ),
+                "Rescate RapidOCR": evidencia.get("rapidocr", {}).get(
+                    "estado", "deshabilitado"
+                ),
                 "Comprobantes detectados": len(evidencia["comprobantes"]),
                 "Comprobantes completos": sum(
                     bool(x.get("periodo") and x.get("fecha_pago"))
