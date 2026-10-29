@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+# Tesseract invoca subprocess por celda; cuatro hilos POR llamada ralentizan
+# un servidor pequeño cuando hay varios PDF. Límite recomendado por Tesseract.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 import platform
 import sys
 from pathlib import Path
@@ -26,7 +30,7 @@ from fonasa_validacion import comprobar_traza_dias
 from nomina_salud import construir_nomina_salud
 from reporte_nomina_excel import generar_excel_nomina
 
-VERSION = "19.0-Nomina-Salud-Excel"
+VERSION = "19.1-Rescate-de-Planillas"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -75,7 +79,7 @@ if not estado_motor.get("contrato_traza"):
         "No se considerarán válidas lecturas sin trazabilidad. "
         + estado_motor.get("error", "")
     )
-st.info("**Modo simplificado activo:** se leen respaldos de pago y trabajadores de Fonasa. No se exige cuadratura de bases imponibles por defecto.")
+st.info("**Modo rápido activo:** búsqueda de planillas Fonasa e Isapre con rescate automático si falla la lectura inicial. Se omiten cuadraturas de montos por defecto.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
 st.subheader("Subir archivos")
@@ -213,6 +217,7 @@ if st.button(
                 # Anexos suelen seguir a la carátula; búsqueda acotada.
                 paginas = list(range(2, min(resultado["paginas"], 12) + 1, 2))
             try:
+                diagnostico_lector = {}
                 instituciones_salud = {
                     int(e.get("pagina")): e.get("institucion", "")
                     for e in resultado.get("comprobantes", [])
@@ -225,13 +230,20 @@ if st.button(
                 nomina = extraer_fonasa_con_contrato(
                     data, paginas_candidatas=paginas,
                     instituciones_candidatas=instituciones_salud,
+                    diagnostico=diagnostico_lector,
+                    usar_ocr_alternativo=usar_rapidocr,
                 )
+                resultado["diagnostico_nomina"] = diagnostico_lector
             except Exception as exc:
                 # Un fallo de extracción de nómina NO equivale a impago.
                 # Informar el tipo de error y conservar los recibos obtenidos.
                 resultado["error_lector_fonasa"] = (
                     f"{type(exc).__name__}: {str(exc)[:250]}"
                 )
+                resultado["diagnostico_nomina"] = {
+                    **locals().get("diagnostico_lector", {}),
+                    "error": type(exc).__name__,
+                }
                 nomina = []
             return resultado, time.perf_counter() - t, nomina
 
@@ -309,10 +321,16 @@ if st.button(
                 "Rescate RapidOCR": evidencia.get("rapidocr", {}).get(
                     "estado", "deshabilitado"
                 ),
-                "Trabajadores Fonasa": sum(
+                "Trabajadores salud": sum(
                     len(x.get("trabajadores", []))
                     for x in evidencia.get("nomina_fonasa", [])
                 ),
+                "Ruta lectura nómina": evidencia.get(
+                    "diagnostico_nomina", {}
+                ).get("ruta", "sin resultado"),
+                "Tiempo nómina (s)": evidencia.get(
+                    "diagnostico_nomina", {}
+                ).get("duracion_segundos"),
                 "Comprobantes detectados": len(evidencia["comprobantes"]),
                 "Comprobantes completos": sum(
                     bool(x.get("periodo") and x.get("fecha_pago"))
@@ -333,24 +351,34 @@ if st.button(
                 )
             except Exception as exc:
                 errores.append("Cotizaciones/planillas: " + str(exc)[:450])
-        cruzados, resumen_cruce = conciliar_f301_previred(
-            certificados, nomina, matriz
-        )
+        if certificados or modo_avanzado:
+            cruzados, resumen_cruce = conciliar_f301_previred(
+                certificados, nomina, matriz
+            )
+        else:
+            cruzados, resumen_cruce = pd.DataFrame(), pd.DataFrame()
         bandeja = generar_bandeja(
             certificados=certificados, incidencias=incidencias,
             detalle=detalle, log=log, cruce_detalle=cruzados,
             cruce_resumen=resumen_cruce, errores=errores, duplicados=duplicados,
             pagos_documentales=pagos_documentales,
         )
-        calidad = resumen_calidad(certificados, matriz, bandeja)
-        try:
-            reporte_excel = informe_consolidado(
-                bandeja=bandeja, certificados=certificados, matriz=matriz,
-                detalle_cruce=cruzados, resumen_cruce=resumen_cruce,
-                log=log, incidencias=incidencias,
-            )
-        except Exception:
-            reporte_excel = None  # No perder la auditoría si el exportador falla.
+        calidad = (
+            resumen_calidad(certificados, matriz, bandeja)
+            if (certificados or modo_avanzado) else {}
+        )
+        # Se omite generar otro Excel costoso de conciliación cuando el
+        # usuario solo quiere la nómina de trabajadores y días cotizados.
+        reporte_excel = None
+        if certificados or modo_avanzado:
+            try:
+                reporte_excel = informe_consolidado(
+                    bandeja=bandeja, certificados=certificados, matriz=matriz,
+                    detalle_cruce=cruzados, resumen_cruce=resumen_cruce,
+                    log=log, incidencias=incidencias,
+                )
+            except Exception:
+                pass  # No perder la nómina por un fallo secundario.
     # Consolidar una sola nómina de trabajadores de FONASA E ISAPRES.
     # Solo asociar un pago con una planilla de la misma institución de salud.
     nomina_unificada, alertas_salud = construir_nomina_salud(

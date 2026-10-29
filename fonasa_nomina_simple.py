@@ -219,7 +219,7 @@ def _dias_celda(imagen, x0, x1, y0, y1, diagnostico=None):
         })
     return valor
 
-def _nomina_de_imagen(imagen):
+def _nomina_de_imagen(imagen, usar_ocr_alternativo=False):
     geomet = _reticula(imagen)
     if not geomet:
         return []
@@ -245,6 +245,9 @@ def _nomina_de_imagen(imagen):
             bloques[previo].append(i)
 
     salida = []
+    # La IA alternativa se carga UNA SOLA VEZ y solo si una persona no
+    # obtuvo ningún día positivo del primer OCR. Nunca sobreescribe 0 leído.
+    rapid_celdas = None
     for rut, indices in bloques.items():
         apellido_paterno = _nombres(pat, indices)
         apellido_materno = _nombres(mat, indices)
@@ -273,6 +276,41 @@ def _nomina_de_imagen(imagen):
         dias_confirmados = (
             dias_unicos[0] if len(dias_unicos) == 1 else None
         )
+        # Si el primer OCR no produjo ningún día, usar RapidOCR (ONNX)
+        # sobre LA COLUMNA, no relanzar un segundo motor por cada celda.
+        if dias_confirmados is None and not dias_unicos and usar_ocr_alternativo:
+            if rapid_celdas is None:
+                try:
+                    from ocr_alternativo_nomina import leer_columna_dias_rapidocr
+                    rapid_celdas = leer_columna_dias_rapidocr(
+                        imagen, filas, columnas[5], columnas[6]
+                    )
+                except (ImportError, OSError, RuntimeError, ValueError, TypeError):
+                    rapid_celdas = {}
+            alternativas = []
+            for i, traza in zip(indices, trazas):
+                propuesta = rapid_celdas.get(i)
+                if not propuesta:
+                    continue
+                valor_alt, confianza_alt = propuesta
+                # Un cero ya detectado o una forma contradictoria no se
+                # puede convertir en días cotizados por el segundo motor.
+                if traza.get("metodo") in (
+                    "movimiento_cero", "rechazado_por_grafia_cerrada"
+                ):
+                    continue
+                if traza.get("glifo_cerrado") and valor_alt in (1, 2, 7):
+                    continue
+                alternativas.append((i, valor_alt, confianza_alt))
+            if len(alternativas) == 1:
+                indice_fila, dias_confirmados, confianza_alt = alternativas[0]
+                traza = trazas[indices.index(indice_fila)]
+                traza.update({
+                    "valor": dias_confirmados,
+                    "metodo": "ocr_rapidocr",
+                    "ocr_bruto": str(dias_confirmados),
+                    "confianza_segundo_motor": confianza_alt,
+                })
         salida.append({
             "trabajador_nombre": " ".join(
                 x for x in (nombre, apellido_paterno, apellido_materno) if x
@@ -422,7 +460,7 @@ def _es_anexo_fonasa(pagina, orientacion):
 
 
 def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18,
-                         instituciones_candidatas=None):
+                         instituciones_candidatas=None, usar_ocr_alternativo=False):
     """Lee anexos de salud: Fonasa o Isapres (recibo y hoja siguiente).
 
     No hace cuadraturas ni valida pagos. Esa tarea la cumple el lector separado
@@ -481,7 +519,9 @@ def extraer_nomina_fonasa(contenido, paginas_candidatas=None, max_paginas=18,
             filas = (
                 _nomina_de_imagen_isapre(im)
                 if tipo.startswith("Isapre")
-                else _nomina_de_imagen(im)
+                else _nomina_de_imagen(
+                    im, usar_ocr_alternativo=usar_ocr_alternativo
+                )
             )
             if filas:
                 # Institución leída EN LA MISMA PÁGINA de salud. No asignar

@@ -10,6 +10,7 @@ import hashlib
 import importlib
 import inspect
 import marshal
+import time
 from pathlib import Path
 from typing import Any
 
@@ -79,30 +80,83 @@ def _nomina_tiene_traza(nomina: list) -> bool:
 
 
 def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
-                                instituciones_candidatas=None):
-    """Nunca entrega cinco trabajadores sin trazabilidad de sus cifras.
+                                instituciones_candidatas=None,
+                                diagnostico=None, usar_ocr_alternativo=False):
+    """OCR primero en páginas conocidas; rescate geométrico solo si falla.
 
-    Si el primer resultado carece de traza, recarga el módulo y reintenta UNA
-    vez. Si persiste, eleva error explícito para no falsear el reporte.
+    La etapa rápida no requiere identificar un recibo. Si el OCR produce
+    personas sin traza, se rechaza antes de devolver valores inventados.
     """
+    inicio = time.perf_counter()
     modulo = cargar_lector_fonasa()
     nomina = modulo.extraer_nomina_fonasa(
         contenido, paginas_candidatas=paginas_candidatas,
         instituciones_candidatas=instituciones_candidatas,
+        usar_ocr_alternativo=usar_ocr_alternativo,
     )
-    if _nomina_tiene_traza(nomina):
-        return nomina
-    importlib.invalidate_caches()
-    modulo = importlib.reload(modulo)
-    if not _contrato_valido(modulo):
-        raise RuntimeError("Fonasa: bytecode OCR desactualizado tras recarga.")
-    nomina = modulo.extraer_nomina_fonasa(
-        contenido, paginas_candidatas=paginas_candidatas,
-        instituciones_candidatas=instituciones_candidatas,
-    )
-    if not _nomina_tiene_traza(nomina):
-        raise RuntimeError(
-            "Fonasa: no hay traza de días por trabajador después "
-            "de repetir el OCR; no se deben mostrar días sin procedencia."
+    modo = "paginas_por_comprobante"
+    candidatas = []
+    if not nomina:
+        # ERROR ANTERIOR: un recibo ilegible dejaba nomina=[] sin intentar
+        # localizar el ANEXO por su retícula (aunque la página 4 fuera clara).
+        from rescate_planillas import buscar_paginas_con_planilla
+        candidatas = buscar_paginas_con_planilla(
+            contenido, max_paginas=24
         )
+        paginas_rescate = [
+            max(1, p["pagina"] - 1) for p in candidatas[:8]
+        ]
+        if paginas_rescate:
+            modo = "rescate_por_reticula"
+            nomina = modulo.extraer_nomina_fonasa(
+                contenido, paginas_candidatas=paginas_rescate,
+                instituciones_candidatas=instituciones_candidatas,
+                usar_ocr_alternativo=usar_ocr_alternativo,
+            )
+    if not nomina and candidatas and usar_ocr_alternativo:
+        # SOLO cuando la retícula encontró tablas y Tesseract no identificó
+        # una planilla de salud, pedir a RapidOCR una segunda lectura del
+        # encabezado. RapidOCR NO inventa nombres/días: solo da una pista
+        # para repetir el lector estructurado.
+        from rescate_planillas import rescatar_institucion_rapidocr
+        sugerencias = rescatar_institucion_rapidocr(
+            contenido, (x["pagina"] for x in candidatas[:3])
+        )
+        if sugerencias:
+            modo = "rapidocr_encabezado_mas_lector_tabla"
+            pistas = dict(instituciones_candidatas or {})
+            pistas.update(sugerencias)
+            nomina = modulo.extraer_nomina_fonasa(
+                contenido,
+                paginas_candidatas=[
+                    max(1, x["pagina"] - 1) for x in candidatas[:3]
+                ],
+                instituciones_candidatas=pistas,
+                usar_ocr_alternativo=usar_ocr_alternativo,
+            )
+    if nomina and not _nomina_tiene_traza(nomina):
+        importlib.invalidate_caches()
+        modulo = importlib.reload(modulo)
+        if not _contrato_valido(modulo):
+            raise RuntimeError("Salud: bytecode OCR desactualizado tras recarga.")
+        nomina = modulo.extraer_nomina_fonasa(
+            contenido, paginas_candidatas=paginas_candidatas,
+            instituciones_candidatas=instituciones_candidatas,
+            usar_ocr_alternativo=usar_ocr_alternativo,
+        )
+        if not _nomina_tiene_traza(nomina):
+            raise RuntimeError(
+                "Salud: no hay traza de días por trabajador después "
+                "de repetir el OCR; no mostrar días sin procedencia."
+            )
+    if diagnostico is not None:
+        diagnostico.update({
+            "ruta": modo,
+            "paginas_rescate": [x["pagina"] for x in candidatas],
+            "duracion_segundos": round(time.perf_counter() - inicio, 3),
+            "segundo_motor_habilitado": bool(usar_ocr_alternativo),
+            "trabajadores_encontrados": sum(
+                len(x.get("trabajadores", [])) for x in nomina
+            ),
+        })
     return nomina

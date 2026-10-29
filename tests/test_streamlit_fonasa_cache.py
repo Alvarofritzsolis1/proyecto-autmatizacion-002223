@@ -48,7 +48,7 @@ def test_dias_ilegibles_no_se_muestran_como_texto_none():
 
 def test_version_nueva_identificable_en_pantalla():
     codigo = _codigo()
-    assert 'VERSION = "19.0-Nomina-Salud-Excel"' in codigo
+    assert 'VERSION = "19.1-Rescate-de-Planillas"' in codigo
     assert 'f"Control documental de contratistas · {VERSION} "' in codigo
 
 
