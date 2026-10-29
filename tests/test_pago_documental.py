@@ -118,3 +118,31 @@ def test_periodo_no_se_toma_de_fecha_pago():
     from pago_documental import _periodo
     text = "Pago Electronico 20/10/2026, Periodo de Remuneraciones: 09/2026"
     assert _periodo(text) == "2026-09"
+
+def test_classifier_previred_digital_without_trusting_filename():
+    import fitz
+    from f301_lector import _es_previred_rapido
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (40, 50),
+        "PLANILLA DE DECLARACION Y PAGO SIMULTANEO DE OBLIGACIONES PREVISIONALES"
+    )
+    page.insert_text((40, 75), "Previred - periodo 09/2026, pago electronico 10/10/2026")
+    page.insert_text((40, 95), "Numero de folio 2017260900656295")
+    page.insert_text((40, 115), "Total de cotizaciones acreditadas en documento")
+    assert _es_previred_rapido(page) is True
+    doc.close()
+
+
+def test_classifier_does_not_reject_f301_by_generic_cotizaciones_word():
+    import fitz
+    from f301_lector import _es_previred_rapido
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((40, 50), "CERTIFICADO DE CUMPLIMIENTO")
+    page.insert_text((40, 75), "OBLIGACIONES LABORALES Y PREVISIONALES")
+    page.insert_text((40, 95), "Contiene cotizaciones previsionales y trabajadores declarados.")
+    page.insert_text((40, 115), "El empleador declara cumplimiento de sus obligaciones.")
+    assert _es_previred_rapido(page) is False
+    doc.close()
