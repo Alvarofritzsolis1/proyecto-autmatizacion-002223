@@ -50,6 +50,7 @@ def comprobar_traza_dias(registro: dict) -> dict:
     else:
         estado = "SIN_METODO"
         nota = "Falta identificar la regla que produjo la lectura."
+        valor = None
     return {
         "estado": estado,
         "valor_confiable": valor,
