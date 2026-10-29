@@ -216,7 +216,14 @@ elif reporte:
                 "Observación": ev["observacion"],
             })
     if filas_pago:
-        st.dataframe(pd.DataFrame(filas_pago), hide_index=True, use_container_width=True)
+        tabla_pago = pd.DataFrame(filas_pago)
+        st.dataframe(tabla_pago, hide_index=True, use_container_width=True)
+        st.download_button(
+            "Descargar respaldo de pagos (CSV compatible con Excel)",
+            data=tabla_pago.to_csv(index=False).encode("utf-8-sig"),
+            file_name="GALANT_Respaldo_Pagos.csv",
+            mime="text/csv",
+        )
         incompletos = [
             x for x in reporte["pagos_documentales"] if not x["revision_integral"]
         ]
