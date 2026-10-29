@@ -47,6 +47,12 @@ def comprobar_traza_dias(registro: dict) -> dict:
     elif metodo == "ocr_numero":
         estado = "LECTURA_OCR"
         nota = "Leído por Tesseract, pendiente de cotejo con PDF."
+    elif metodo == "ocr_rapidocr":
+        estado = "OCR_ALTERNATIVO_REVISAR"
+        nota = (
+            "Días propuestos por RapidOCR tras fallar Tesseract; "
+            "cotejar con la celda del PDF antes de aprobar el pago."
+        )
     else:
         estado = "SIN_METODO"
         nota = "Falta identificar la regla que produjo la lectura."
