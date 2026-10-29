@@ -22,6 +22,7 @@ from bandeja_revision import generar_bandeja, resumen_calidad
 from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 from fonasa_nomina_simple import extraer_nomina_fonasa
+from fonasa_validacion import comprobar_traza_dias
 
 VERSION = "18.7-Fonasa-trazable"
 MAX_ARCHIVOS = 20
@@ -183,7 +184,10 @@ if st.button(
                 nomina = extraer_nomina_fonasa(
                     data, paginas_candidatas=paginas,
                 )
-            except (RuntimeError, ValueError, OSError, ImportError):
+            except Exception as exc:
+                # Un fallo de extracción de nómina NO equivale a impago.
+                # Informar el tipo de error y conservar los recibos obtenidos.
+                resultado["error_lector_fonasa"] = type(exc).__name__
                 nomina = []
             return resultado, time.perf_counter() - t, nomina
 
@@ -387,6 +391,7 @@ elif reporte:
         periodo = ""
         fecha_pago = ""
         folio = ""
+        estado_celda = comprobar_traza_dias(trabajador)
         for recibo in reporte.get("pagos_documentales", []):
             if recibo.get("archivo") != archivo:
                 continue
@@ -406,7 +411,8 @@ elif reporte:
             "Archivo": archivo,
             "Nombre trabajador": trabajador.get("trabajador_nombre", ""),
             "RUT": trabajador.get("trabajador_rut", ""),
-            "Días trabajados": trabajador.get("dias_trabajados_fonasa"),
+            "Días trabajados": estado_celda["valor_confiable"],
+            "Estado OCR días": estado_celda["estado"],
             "Método de lectura": trabajador.get("metodo_dias", "Sin traza"),
             "Período": periodo or "Por confirmar",
             "Fecha pago Fonasa": fecha_pago or "Por confirmar",
@@ -414,7 +420,8 @@ elif reporte:
             "Página anexo": trabajador.get("pagina_fonasa", ""),
             "Observación": (
                 "Revisar días en anexo (OCR ambiguo)"
-                if trabajador.get("dias_requieren_revision") else ""
+                if trabajador.get("dias_requieren_revision")
+                else estado_celda["observacion"]
             ),
         })
     if filas_fonasa:
@@ -516,6 +523,7 @@ elif reporte:
                     "sha256_pdf": doc.get("sha256_pdf"),
                     "paginas": doc.get("paginas"),
                     "paginas_ocr": doc.get("paginas_ocr"),
+                    "error_lector_fonasa": doc.get("error_lector_fonasa"),
                     "fonasa_paginas": [
                         {
                             "pagina": x.get("pagina"),
@@ -529,6 +537,15 @@ elif reporte:
             st.dataframe(
                 pd.DataFrame(pruebas), hide_index=True, use_container_width=True
             )
+            fallidos = [
+                d for d in pruebas if d.get("error_lector_fonasa")
+            ]
+            if fallidos:
+                st.error(
+                    f"El lector Fonasa falló internamente en "
+                    f"{len(fallidos)} documento(s); no afirmar que se "
+                    "completó su nómina. Ver columna error_lector_fonasa."
+                )
             paquete = {
                 "entorno": reporte.get("entorno", {}),
                 "documentos": pruebas,
@@ -568,6 +585,9 @@ elif reporte:
                     (x for x in fila.get("traza_dias", [])
                      if x.get("valor") is not None and x.get("celda_px")),
                     None,
+                ) or next(
+                    (x for x in fila.get("traza_dias", [])
+                     if x.get("celda_px")), None
                 )
                 if pdf_cargado and traza_primaria:
                     try:
