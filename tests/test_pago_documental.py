@@ -146,3 +146,53 @@ def test_classifier_does_not_reject_f301_by_generic_cotizaciones_word():
     page.insert_text((40, 115), "El empleador declara cumplimiento de sus obligaciones.")
     assert _es_previred_rapido(page) is False
     doc.close()
+
+
+def test_periodo_en_casillas_separadas_con_etiqueta_a_la_derecha():
+    """Imagen de GALANT: PERIODO x=0.62, MES 09 x=0.48, AÑO x=0.51."""
+    from pago_documental import _periodo_espacial
+    d = {
+        "text": ["PERIODO", "09", "2026", "INICIO", "15", "09", "2026"],
+        "left": [620, 487, 513, 750, 755, 790, 830],
+        "top": [322, 369, 369, 520, 545, 545, 545],
+        "conf": [92, 86, 86, 80, 80, 80, 80],
+    }
+    assert _periodo_espacial(d, 1000, 1000) == "2026-09"
+
+
+def test_ocr_periodo_intercalado_en_afp_planvital():
+    from pago_documental import _periodo
+    assert _periodo("Periodo\nRetroactivo\n09/2026\nFecha Pago\n13/10/2026") == "2026-09"
+    assert _periodo("Perlodo de Remuneraciones: 09/2026") == "2026-09"
+
+
+def test_ocr_fecha_pago_electronico_sin_palabra_pago():
+    from pago_documental import _fecha_espacial
+    d = {
+        "text": ["Comprobante", "Electrénico", "13/10/2026", "PREVIRED"],
+        "left": [20, 827, 815, 830],
+        "top": [65, 398, 424, 448],
+        "conf": [90, 86, 91, 95],
+    }
+    assert _fecha_espacial(d, 1000, 1000) == "13/10/2026"
+
+
+def test_ocr_periodo_sin_confundir_fechas_de_movimientos():
+    from pago_documental import _periodo_espacial
+    d = {
+        "text": ["DIA", "MES", "AÑO", "09", "2026", "15", "09", "2026"],
+        "left": [600, 700, 800, 790, 830, 700, 790, 830],
+        "top": [340, 340, 340, 390, 390, 412, 412, 412],
+        "conf": [90] * 8,
+    }
+    assert _periodo_espacial(d, 1000, 1000) == ""
+
+
+def test_ocr_fecha_declaracion_no_equivale_a_fecha_pago():
+    from pago_documental import _fecha_pago
+    assert _fecha_pago("Fecha Declaración: 10/10/2026") == ""
+    texto = (
+        "Pago Electrénico\nPeriodo de Remuneraciones: 09/2026\n"
+        "Número de Folio: 2006260901492723\n13/10/2026\n10:47 PM"
+    )
+    assert _fecha_pago(texto) == "13/10/2026"
