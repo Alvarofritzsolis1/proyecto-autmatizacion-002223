@@ -1,10 +1,12 @@
 name: GALANT - regresion 20 celdas Fonasa
 on:
   push:
-    branches: [fix/galant-fonasa-dias-11-27-20261029, main]
+    branches: [fix/galant-fonasa-dias-11-27-20261029, fix/galant-invalidar-cache-fonasa-v1862, main]
     paths:
       - 'fonasa_nomina_simple.py'
+      - 'app.py'
       - 'tests/test_fonasa_dias_robustos.py'
+      - 'tests/test_streamlit_fonasa_cache.py'
       - '.github/workflows/galant-fonasa-dias-ci.yml'
   pull_request:
     paths:
@@ -30,4 +32,4 @@ jobs:
       - name: Validate syntax
         run: python -m compileall -q fonasa_nomina_simple.py tests/test_fonasa_dias_robustos.py
       - name: 20 OCR cases + original Fonasa regression suite
-        run: python -m pytest -q tests/test_fonasa_dias_robustos.py tests/test_fonasa_nomina_simple.py
+        run: python -m pytest -q tests/test_fonasa_dias_robustos.py tests/test_fonasa_nomina_simple.py tests/test_streamlit_fonasa_cache.py
