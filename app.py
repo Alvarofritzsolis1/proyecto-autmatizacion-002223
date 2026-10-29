@@ -15,7 +15,7 @@ from informe_galant import informe_consolidado
 from pago_documental import analizar_pago_pdf
 from fonasa_nomina_simple import extraer_nomina_fonasa
 
-VERSION = "18.6-Fonasa-simple-preview"
+VERSION = "18.6-Fonasa-simple"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -26,7 +26,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 st.title("GALANT")
-st.caption("Control documental de contratistas")
+st.caption(f"Control documental de contratistas · {VERSION}")
+st.info("**Modo simplificado activo:** se leen respaldos de pago y trabajadores de Fonasa. No se exige cuadratura de bases imponibles por defecto.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
 st.subheader("Subir archivos")
