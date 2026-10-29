@@ -44,7 +44,12 @@ def test_veinte_cifras_sin_falsos_dias(numero):
 
 
 def test_doble_uno_es_geometrico_y_no_depende_de_ocr():
-    imagen = _celda(11)
+    # Glifos finos típicos del formulario escaneado, no fuente bold.
+    imagen = Image.new("L", (84, 30), 255)
+    dibujo = ImageDraw.Draw(imagen)
+    dibujo.rectangle((0, 0, 83, 29), outline=0, width=2)
+    dibujo.rectangle((36, 9, 38, 21), fill=0)
+    dibujo.rectangle((46, 9, 48, 21), fill=0)
     assert _grafia_celda_dias(imagen, 0, 83, 0, 29)[0]
     with patch(
         "fonasa_nomina_simple.pytesseract.image_to_string",
