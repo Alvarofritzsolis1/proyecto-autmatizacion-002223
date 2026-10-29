@@ -45,8 +45,20 @@ def _detalle_revision(texto: str) -> tuple[str, str]:
             "Lectura pendiente",
             "Revisar las filas no reconocidas del PDF. No significa deuda ni RUT inválido."
         )
-    if re.search(r"r[uú]t.*(?:invalido|inv[aá]lido|d[ií]gito verificador)", k):
-        return ("RUT sin validación", "Cotejar RUT con el original y corregir OCR si corresponde.")
+    if re.search(
+        r"r[uú]t del (?:contratista|trabajador) inv[aá]lido", k
+    ) or re.search(r"r[uú]t.*d[ií]gito verificador", k):
+        return (
+            "RUT con dígito verificador incorrecto",
+            "Revisar el RUT específico indicado en el documento; no atribuir "
+            "un error del contratista al trabajador."
+        )
+    if "falta el rut del contratista" in k or "contratista_rut" in k:
+        return (
+            "RUT del contratista no identificado",
+            "Recuperar el RUT del empleador desde el encabezado de la planilla; "
+            "el RUT del trabajador puede ser correcto."
+        )
     if "duplicad" in k:
         return ("Posible duplicado", "Revisar archivos y movimientos: no sumar dos veces una misma fila.")
     if "faltan" in k or "falta " in k or "ilegible" in k or "ocr" in k:
@@ -58,6 +70,26 @@ def _detalle_revision(texto: str) -> tuple[str, str]:
     if "dias" in k or "días" in k:
         return ("Días por confirmar", "Verificar período y días en el anexo individual.")
     return ("Observación documental", "Revisar la evidencia indicada antes de emitir una conclusión.")
+
+
+def _separar_cobertura_ocr(texto: str) -> tuple[str, list[str]]:
+    """Agrupa advertencias OCR globales sin borrar los problemas por trabajador.
+
+    Una página ilegible no debe convertirse en cuatro alertas independientes
+    si hay cuatro trabajadores en la misma nómina.
+    """
+    patron = re.compile(
+        r"(?:Conflicto entre tablas del PDF:\s*)?"
+        r"Revisi[oó]n cobertura OCR:\s*(p\.?\s*\d+)"
+        r"\s*:\s*([^;]*)(?:;\s*)?", re.I
+    )
+    fragmentos = [
+        f"{m.group(1).replace(' ', '')}: {m.group(2).strip()}"
+        for m in patron.finditer(texto)
+    ]
+    limpio = patron.sub("", texto)
+    limpio = re.sub(r";\s*;", "; ", limpio).strip(" ;")
+    return limpio, list(dict.fromkeys(fragmentos))
 
 
 def generar_bandeja(
@@ -140,11 +172,25 @@ def generar_bandeja(
 
     if detalle is not None and not detalle.empty:
         for _, fila in detalle.iterrows():
-            motivo = _valor(fila.get("motivo_revision"))
+            motivo_original = _valor(fila.get("motivo_revision"))
+            motivo, coberturas = _separar_cobertura_ocr(motivo_original)
+            for cobertura in coberturas:
+                agregar(
+                    "MEDIA", "Cobertura OCR (avanzado)",
+                    f"Lectura de nómina pendiente: {cobertura}",
+                    "Revisar esta página solo para cuadratura detallada. "
+                    "No implica que las cotizaciones estén impagas.",
+                    archivo=fila.get("archivo_origen", ""),
+                    pagina=cobertura.split(":", 1)[0],
+                    contratista=fila.get("contratista_nombre", ""),
+                    periodo=fila.get("periodo_remuneracion", ""),
+                )
+            if not motivo:
+                continue  # No multiplicar un aviso global por cada RUT válido.
             estado = _valor(fila.get("estado_auditoria"))
             problema, accion = _detalle_revision(motivo)
             prioridad = "ALTA" if estado.startswith("ALERTA") else "MEDIA"
-            if "RUT sin validación" == problema:
+            if problema == "RUT con dígito verificador incorrecto":
                 prioridad = "ALTA"
             if problema == "Lectura pendiente":
                 # Un problema de extracción del ARCHIVO no debe aparecer como
