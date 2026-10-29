@@ -37,4 +37,4 @@ jobs:
       - name: Validar sintaxis
         run: python -m compileall -q fonasa_nomina_simple.py app.py pago_documental.py
       - name: Validar nómina Fonasa y pago documental
-        run: python -m pytest -q tests/test_fonasa_nomina_simple.py tests/test_fonasa_dias_robustos.py tests/test_streamlit_fonasa_cache.py tests/test_fonasa_trazabilidad.py tests/test_pago_documental.py tests/test_rapidocr_pago.py
+        run: python -m pytest -q tests/test_fonasa_nomina_simple.py tests/test_fonasa_dias_robustos.py tests/test_streamlit_fonasa_cache.py tests/test_fonasa_trazabilidad.py tests/test_fonasa_runtime.py tests/test_pago_documental.py tests/test_rapidocr_pago.py
