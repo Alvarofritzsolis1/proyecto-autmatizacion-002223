@@ -81,7 +81,7 @@ def _nomina_tiene_traza(nomina: list) -> bool:
 
 def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
                                 instituciones_candidatas=None,
-                                diagnostico=None):
+                                diagnostico=None, usar_ocr_alternativo=False):
     """OCR primero en páginas conocidas; rescate geométrico solo si falla.
 
     La etapa rápida no requiere identificar un recibo. Si el OCR produce
@@ -111,6 +111,26 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
                 contenido, paginas_candidatas=paginas_rescate,
                 instituciones_candidatas=instituciones_candidatas,
             )
+    if not nomina and candidatas and usar_ocr_alternativo:
+        # SOLO cuando la retícula encontró tablas y Tesseract no identificó
+        # una planilla de salud, pedir a RapidOCR una segunda lectura del
+        # encabezado. RapidOCR NO inventa nombres/días: solo da una pista
+        # para repetir el lector estructurado.
+        from rescate_planillas import rescatar_institucion_rapidocr
+        sugerencias = rescatar_institucion_rapidocr(
+            contenido, (x["pagina"] for x in candidatas[:3])
+        )
+        if sugerencias:
+            modo = "rapidocr_encabezado_mas_lector_tabla"
+            pistas = dict(instituciones_candidatas or {})
+            pistas.update(sugerencias)
+            nomina = modulo.extraer_nomina_fonasa(
+                contenido,
+                paginas_candidatas=[
+                    max(1, x["pagina"] - 1) for x in candidatas[:3]
+                ],
+                instituciones_candidatas=pistas,
+            )
     if nomina and not _nomina_tiene_traza(nomina):
         importlib.invalidate_caches()
         modulo = importlib.reload(modulo)
@@ -130,6 +150,7 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
             "ruta": modo,
             "paginas_rescate": [x["pagina"] for x in candidatas],
             "duracion_segundos": round(time.perf_counter() - inicio, 3),
+            "segundo_motor_habilitado": bool(usar_ocr_alternativo),
             "trabajadores_encontrados": sum(
                 len(x.get("trabajadores", [])) for x in nomina
             ),
