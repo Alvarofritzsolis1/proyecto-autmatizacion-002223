@@ -15,7 +15,7 @@ def _flat(texto):
     return "".join(c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c)!="Mn").lower()
 
 def _periodo(texto):
-    t=_flat(texto)
+    t=re.sub(r"\bper[l1]odo\b","periodo",_flat(texto))
     for pat in [
         r"(?:periodo\s*(?:de\s*)?(?:remuneracion(?:es)?|cotizaciones)?|remuneracion\s*\(\s*mes)[\s:|]{0,25}"+PERIODO,
         r"\bperiodo\b[\s:|]{0,25}"+PERIODO,
@@ -32,6 +32,16 @@ def _periodo(texto):
     for nombre,mes in MESES.items():
         m=re.search(r"\b"+nombre+r"\s+(20\d{2})\b",t)
         if m:return f"{m.group(1)}-{mes:02d}"
+    # OCR separa etiquetas y valores, por ejemplo:
+    # "Periodo / Retroactivo / 09/2026"; impedir que fecha pago sea periodo.
+    for label in re.finditer(r"\bperiodo\b", t):
+        contexto=t[label.end():label.end()+120]
+        m=re.search(
+            r"(?<![\d/])(?<!\d\d/)((?:0?[1-9]|1[0-2]))\s*[/.-]\s*(20\d{2})(?!\d)",
+            contexto
+        )
+        if m and not re.search(r"fecha\s+pago", contexto[:m.start()]):
+            return f"{m.group(2)}-{int(m.group(1)):02d}"
     # En escaneos la etiqueta "Periodo" puede perderse aunque quede "02/2026".
     # Solo aceptar un periodo aislado si hay exactamente un valor distinto.
     candidatos=re.findall(r"(?<!\d)((?:0?[1-9]|1[0-2])\s*[/.-]\s*20\d{2})(?!\d)",t)
@@ -45,6 +55,7 @@ def _fecha_pago(texto):
     for pat in [
         r"fecha\s*(?:de\s*)?pago\s*[:;]?\s*"+FECHA,
         r"pago\s+electronico\s*[:;|\s]{0,45}"+FECHA,
+        r"pago\s+electr[a-z]{2,9}[\s\S]{0,145}?"+FECHA,
     ]:
         m=re.search(pat,t,re.I)
         if m:return re.sub(r"\s+","",m.group(1)).replace(".","/").replace("-","/")
@@ -61,7 +72,8 @@ def _institucion(texto):
     return "AFP "+m.group(1).capitalize() if m else "Institución no identificada"
 
 def _folio(texto):
-    m=re.search(r"(?:numero\s+(?:de\s+)?(?:folio|serie)|n[o°]\s*folio)\s*[:#]?\s*(\d{12,20})",_flat(texto))
+    limpio=re.sub(r"\bn[uaeiog]mero\b","numero",_flat(texto))
+    m=re.search(r"(?:numero\s+(?:de\s+)?(?:folio|serie)|n[o°]\s*folio)\s*[:#]?\s*(\d{12,20})",limpio)
     return m.group(1) if m else ""
 
 def _interpretar(texto,pagina,fuente):
@@ -126,21 +138,35 @@ def _fecha_espacial(datos, ancho, alto):
     return ""
 
 def _periodo_espacial(datos, ancho, alto):
-    """Reconoce '09 2026' en celdas contiguas cuando el OCR separa columnas."""
-    posibles=[]
-    for i,ano in enumerate(datos["text"]):
-        if not re.fullmatch(r"20\d{2}",str(ano)):
-            continue
-        x=datos["left"][i]/ancho
-        y=datos["top"][i]/alto
-        for j,mes in enumerate(datos["text"]):
-            if not re.fullmatch(r"(?:0?[1-9]|1[0-2])",str(mes)):
+    """MES | AÑO en casillas: anclar a PERÍODO, nunca a movimiento personal."""
+    tokens=[str(x).strip() for x in datos["text"]]
+    candidatos=[]
+    anchors=[k for k,v in enumerate(tokens) if v.lower().startswith("period")]
+    for i,year in enumerate(tokens):
+        if not re.fullmatch(r"20\d{2}",year):continue
+        year_x=datos["left"][i]/ancho
+        year_y=datos["top"][i]/alto
+        for j,month in enumerate(tokens):
+            if not re.fullmatch(r"(?:0?[1-9]|1[0-2])",month):continue
+            if min(float(datos["conf"][i]),float(datos["conf"][j]))<35:continue
+            month_x=datos["left"][j]/ancho
+            month_y=datos["top"][j]/alto
+            if not (-.13<month_x-year_x<0 and abs(month_y-year_y)<.015):
                 continue
-            dx=datos["left"][j]/ancho-x
-            dy=abs(datos["top"][j]/alto-y)
-            if -0.12<dx<0 and dy<0.015 and float(datos["conf"][j])>=35:
-                posibles.append((dy,f"{ano}-{int(mes):02d}"))
-    return sorted(posibles)[0][1] if posibles else ""
+            nearby=any(
+                abs(datos["top"][k]/alto-year_y)<.085
+                and datos["left"][k]/ancho<=year_x+.08
+                for k in anchors
+            )
+            if nearby:
+                candidatos.append((0,abs(month_y-year_y),f"{year}-{int(month):02d}"))
+            elif year_y<.335:
+                candidatos.append((1,abs(month_y-year_y),f"{year}-{int(month):02d}"))
+    if not candidatos:return ""
+    prioridad=min(x[0] for x in candidatos)
+    valores={x[2] for x in candidatos if x[0]==prioridad}
+    return next(iter(valores)) if len(valores)==1 else ""
+
 
 def _ocr_portada(pagina, orientacion_previa=None):
     """Un OCR espacial por orientación candidata; alternar solo si hace falta."""
@@ -229,12 +255,24 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
             if e:
                 if periodo_visual and not e["periodo"]:
                     e["periodo"]=periodo_visual
-                if fecha_visual and not e["fecha_pago"]:
+                if fecha_visual:
+                    if e["fecha_pago"] and e["fecha_pago"]!=fecha_visual:
+                        e["observacion"]=(
+                            "OCR contradictorio: fecha textual "+e["fecha_pago"]+
+                            " y cuadro Pago Electrónico "+fecha_visual
+                        )
+                        e["conflicto_fecha_ocr"]=True
+                        e["estado"]="FECHA_REQUIERE_CONFIRMACION"
                     e["fecha_pago"]=fecha_visual
-                    titulo_no_pago=("comprobante de declaracion y no pago" in _flat(texto)
-                                    or "comprobante de declaracion y no de pago" in _flat(texto))
-                    e["estado"]=("PAGO_POSTERIOR_DOCUMENTADO_REVISAR"
-                                  if titulo_no_pago else "PAGO_RESPALDADO_EN_DOCUMENTO")
+                    if not e.get("conflicto_fecha_ocr"):
+                        titulo_no_pago=(
+                            "comprobante de declaracion y no pago" in _flat(texto)
+                            or "comprobante de declaracion y no de pago" in _flat(texto)
+                        )
+                        e["estado"]=(
+                            "PAGO_POSTERIOR_DOCUMENTADO_REVISAR"
+                            if titulo_no_pago else "PAGO_RESPALDADO_EN_DOCUMENTO"
+                        )
                 evidencias.append(e)
         # Una compilación puede comenzar con DETALLE: no siempre hay portadas impares.
         # Rescate acotado, solo si faltan comprobantes y hay presupuesto OCR.
@@ -257,7 +295,8 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
         for ev in evidencias:
             if ev["fuente"]!="OCR" or not ev["folio"] or (
                 ev["fecha_pago"] and ev["periodo"] and
-                not ev["institucion"].startswith("Institución")
+                not ev["institucion"].startswith("Institución") and
+                not ev.get("conflicto_fecha_ocr")
             ):
                 continue
             i=ev["pagina"]
@@ -270,10 +309,18 @@ def analizar_pago_pdf(contenido:bytes,nombre:str="",max_paginas_ocr:int=6):
             periodo_det=_periodo(texto_det)
             if periodo_det and not ev["periodo"]:ev["periodo"]=periodo_det
             fecha_det=_fecha_pago(texto_det)
-            if (fecha_det and not ev["fecha_pago"] and
+            if (fecha_det and
                     ("pago elec" in _flat(texto_det) or "fecha pago" in _flat(texto_det))):
-                ev["fecha_pago"]=fecha_det
-                ev["estado"]="PAGO_RESPALDADO_EN_DOCUMENTO"
+                if ev.get("conflicto_fecha_ocr"):
+                    if fecha_det==ev["fecha_pago"]:
+                        ev["conflicto_fecha_ocr"]=False
+                        ev["observacion"]="Fecha corroborada en detalle del mismo folio."
+                        ev["estado"]="PAGO_RESPALDADO_EN_DOCUMENTO"
+                    else:
+                        ev["observacion"]+="; fecha distinta en detalle: "+fecha_det
+                elif not ev["fecha_pago"]:
+                    ev["fecha_pago"]=fecha_det
+                    ev["estado"]="PAGO_RESPALDADO_EN_DOCUMENTO"
             if ev["institucion"].startswith("Institución"):
                 instituto=_institucion(texto_det)
                 if not instituto.startswith("Institución"):ev["institucion"]=instituto
