@@ -88,6 +88,35 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
     personas sin traza, se rechaza antes de devolver valores inventados.
     """
     inicio = time.perf_counter()
+    # Prioridad P0: la capa de texto vectorial del PDF es MÁS precisa y
+    # rápida que rasterizar/Tesseract. Soporta planillas cortas (1-5 personas),
+    # que el detector OpenCV antiguo rechazaba por exigir 6+ líneas.
+    from planillas_texto_digital import extraer_nominas_pdf_texto
+    resultado_digital = extraer_nominas_pdf_texto(
+        contenido, paginas_candidatas=paginas_candidatas,
+        instituciones_candidatas=instituciones_candidatas,
+    )
+    fuente_salud_confirmada = any(
+        x.get("institucion_salud") == "Fonasa"
+        or str(x.get("institucion_salud", "")).startswith("Isapre")
+        for x in resultado_digital
+    )
+    if fuente_salud_confirmada and _nomina_tiene_traza(resultado_digital):
+        if diagnostico is not None:
+            diagnostico.update({
+                "ruta": "texto_pdf_nativo",
+                "duracion_segundos": round(time.perf_counter()-inicio, 3),
+                "trabajadores_encontrados": sum(
+                    len(x.get("trabajadores", [])) for x in resultado_digital
+                ),
+                "paginas_rescate": [],
+                "segundo_motor_habilitado": False,
+            })
+        return resultado_digital
+
+    # Seguro Social sin Fonasa es una referencia útil, pero NO impide que
+    # exista una planilla de salud escaneada más adelante: buscar con OCR.
+    referencia_seguro_social = resultado_digital
     modulo = cargar_lector_fonasa()
     nomina = modulo.extraer_nomina_fonasa(
         contenido, paginas_candidatas=paginas_candidatas,
@@ -149,6 +178,11 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
                 "Salud: no hay traza de días por trabajador después "
                 "de repetir el OCR; no mostrar días sin procedencia."
             )
+    if not nomina and referencia_seguro_social:
+        # Si no existe una nómina de salud recuperada, entregar únicamente
+        # los días documentados por Seguro Social como REFERENCIA PENDIENTE.
+        nomina = referencia_seguro_social
+        modo = "texto_seguro_social_sin_planilla_salud"
     if diagnostico is not None:
         diagnostico.update({
             "ruta": modo,
