@@ -30,7 +30,7 @@ from fonasa_validacion import comprobar_traza_dias
 from nomina_salud import construir_nomina_salud
 from reporte_nomina_excel import generar_excel_nomina
 
-VERSION = "19.2-Texto-PDF-y-OCR"
+VERSION = "19.3-Hibrido-Cobertura-Verificable"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -79,7 +79,7 @@ if not estado_motor.get("contrato_traza"):
         "No se considerarán válidas lecturas sin trazabilidad. "
         + estado_motor.get("error", "")
     )
-st.info("**Lectura adaptativa:** primero texto digital de Fonasa, después OCR para escaneados. Seguro Social se usa para cotejar días; no certifica por sí solo el pago de salud.")
+st.info("**Lectura adaptativa:** texto nativo primero, OCR adicional en páginas de imagen de PDF mixtos y alerta si queda alguna página por revisar. Seguro Social no certifica por sí solo el pago de salud.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
 st.subheader("Subir archivos")
@@ -384,6 +384,39 @@ if st.button(
     nomina_unificada, alertas_salud = construir_nomina_salud(
         pagos_documentales, nominas_fonasa
     )
+    # Una lectura nativa exitosa no demuestra que un PDF mixto esté
+    # completamente revisado. La advertencia también entra en el XLSX.
+    for evidencia in pagos_documentales:
+        diagnostico = evidencia.get("diagnostico_nomina", {})
+        if not diagnostico.get("cobertura_parcial"):
+            continue
+        pendientes = diagnostico.get("paginas_pendientes", [])
+        sin_inspeccionar = diagnostico.get("paginas_sin_inspeccionar", 0)
+        conflictos = diagnostico.get("conflictos_ocr", 0)
+        error_ocr = diagnostico.get("error_ocr_hibrido", "")
+        detalles = []
+        if pendientes:
+            detalles.append(
+                "páginas en imagen sin nómina confirmada: "
+                + ", ".join(str(p) for p in pendientes)
+            )
+        if sin_inspeccionar:
+            detalles.append(
+                f"{sin_inspeccionar} página(s) fuera del límite de inspección"
+            )
+        if conflictos:
+            detalles.append(
+                f"{conflictos} conflicto(s) entre texto nativo y OCR"
+            )
+        if error_ocr:
+            detalles.append("falló el OCR complementario: " + error_ocr)
+        alertas_salud.append({
+            "archivo": evidencia.get("archivo", ""),
+            "detalle": (
+                "COBERTURA PARCIAL: " + "; ".join(detalles)
+                + ". Revisar el PDF; no asumir nómina completa ni impago."
+            ),
+        })
     st.session_state["reporte_galant"] = {
         "firma": firma, "engine_release": VERSION,
         "certificados": certificados,

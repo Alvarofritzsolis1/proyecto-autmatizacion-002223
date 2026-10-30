@@ -12,12 +12,18 @@ on:
       - 'tests/test_nomina_salud.py'
       - 'tests/test_isapre_planilla.py'
       - 'tests/test_reporte_nomina_excel.py'
+      - 'tests/test_fonasa_runtime.py'
+      - 'planillas_texto_digital.py'
       - 'tests/test_streamlit_fonasa_cache.py'
       - '.github/workflows/galant-nomina-salud-ci.yml'
   pull_request:
     paths:
       - 'app.py'
       - 'fonasa_nomina_simple.py'
+      - 'fonasa_runtime.py'
+      - 'planillas_texto_digital.py'
+      - 'tests/test_fonasa_runtime.py'
+      - 'tests/test_planillas_texto_digital.py'
       - 'nomina_salud.py'
       - 'reporte_nomina_excel.py'
       - 'pago_documental.py'

@@ -80,13 +80,158 @@ def _nomina_tiene_traza(nomina: list) -> bool:
     )
 
 
+def _paginas_raster(contenido: bytes, *, limite_inspeccion=80):
+    """Identifica páginas principalmente raster, SIN OCR ni extraer imágenes.
+
+    Un sello o logotipo pequeño no debe provocar OCR. Si se rebasa el
+    límite se informa cobertura desconocida en lugar de declarar éxito.
+    Devuelve (páginas 1-based, páginas sin inspeccionar, páginas inciertas).
+    """
+    raster, inciertas = [], []
+    with fitz.open(stream=contenido, filetype="pdf") as pdf:
+        maximo = min(len(pdf), limite_inspeccion)
+        for idx in range(maximo):
+            pagina = pdf[idx]
+            area = max(float(pagina.rect.get_area()), 1.0)
+            try:
+                imagenes = pagina.get_image_info()
+                cobertura = sum(
+                    fitz.Rect(img["bbox"]).intersect(pagina.rect).get_area()
+                    for img in imagenes if "bbox" in img
+                ) / area
+            except (RuntimeError, ValueError, KeyError, TypeError):
+                inciertas.append(idx + 1)
+                continue
+            if cobertura >= 0.58:
+                raster.append(idx + 1)
+        restantes = max(0, len(pdf) - limite_inspeccion)
+    return raster, restantes, inciertas
+
+
+def _combinar_nominas_hibridas(nativas, escaneadas, paginas_objetivo):
+    """Conserva trabajadores nativos y agrega solo páginas raster revisadas.
+
+    Si dos lectores entregan días positivos distintos para igual RUT, página
+    e institución, el número se ANULA para revisión: jamás elegir uno.
+    """
+    import copy
+    resultado = copy.deepcopy(nativas)
+    indexados = {}
+    for anexo in resultado:
+        for fila in anexo.get("trabajadores", []):
+            clave = (
+                anexo.get("pagina"), anexo.get("institucion_salud"),
+                fila.get("trabajador_rut"),
+            )
+            indexados[clave] = fila
+    leidas = set()
+    conflictos = 0
+    for anexo in escaneadas:
+        pagina = anexo.get("pagina")
+        if pagina not in paginas_objetivo:
+            continue
+        trabajadores = []
+        for fila in anexo.get("trabajadores", []):
+            clave = (
+                pagina, anexo.get("institucion_salud"),
+                fila.get("trabajador_rut"),
+            )
+            previo = indexados.get(clave)
+            if previo is None:
+                trabajadores.append(fila)
+                indexados[clave] = fila
+                continue
+            antiguo = previo.get("dias_trabajados_fonasa")
+            nuevo = fila.get("dias_trabajados_fonasa")
+            if (
+                isinstance(antiguo, int) and isinstance(nuevo, int)
+                and antiguo != nuevo
+            ):
+                conflictos += 1
+                previo["dias_trabajados_fonasa"] = None
+                previo["dias_requieren_revision"] = True
+                previo["observacion_dias"] = (
+                    "Texto PDF y OCR discrepan: días requieren revisión."
+                )
+                for traza in previo.get("traza_dias", []):
+                    traza["valor"] = None
+                    traza["metodo"] = "conflicto_ocr_hibrido"
+        if trabajadores:
+            copia = dict(anexo)
+            copia["trabajadores"] = trabajadores
+            resultado.append(copia)
+        if anexo.get("trabajadores"):
+            leidas.add(pagina)
+    return resultado, leidas, conflictos
+
+
+def _extraer_hibrido(contenido, digital, *, paginas_candidatas,
+                     instituciones_candidatas, diagnostico,
+                     usar_ocr_alternativo, inicio):
+    """Ejecuta OCR únicamente cuando hay páginas raster junto a texto nativo."""
+    paginas_raster, sin_inspeccionar, inciertas = _paginas_raster(contenido)
+    # Una misma página puede contener texto nativo y un anexo como imagen:
+    # revisarla también evita perder trabajadores de una segunda nómina.
+    candidatas = sorted(set(paginas_raster + inciertas))
+    limite_ocr = 8  # Control explícito de memoria / duración del servidor.
+    por_analizar = candidatas[:limite_ocr]
+    pendientes = set(candidatas[limite_ocr:])
+    resultado = digital
+    leidas = set()
+    conflictos = 0
+    error_ocr = ""
+    if por_analizar:
+        try:
+            lector = cargar_lector_fonasa()
+            lectura = lector.extraer_nomina_fonasa(
+                contenido,
+                paginas_candidatas=por_analizar,
+                instituciones_candidatas=instituciones_candidatas,
+                usar_ocr_alternativo=usar_ocr_alternativo,
+            )
+            if lectura and not _nomina_tiene_traza(lectura):
+                raise RuntimeError("OCR híbrido devolvió días sin traza")
+            resultado, leidas, conflictos = _combinar_nominas_hibridas(
+                digital, lectura, set(por_analizar)
+            )
+        except Exception as exc:
+            # No borrar trabajadores verificados digitalmente por una caída
+            # del OCR; sí dejar constancia de lectura PARCIAL y error real.
+            error_ocr = f"{type(exc).__name__}: {str(exc)[:150]}"
+            pendientes.update(por_analizar)
+    pendientes.update(set(por_analizar) - leidas)
+    if diagnostico is not None:
+        diagnostico.update({
+            "ruta": (
+                "texto_pdf_mas_ocr_hibrido" if candidatas
+                else "texto_pdf_nativo"
+            ),
+            "paginas_rescate": [],
+            "paginas_imagen": paginas_raster,
+            "paginas_ocr_intentadas": por_analizar,
+            "paginas_pendientes": sorted(pendientes),
+            "paginas_sin_inspeccionar": sin_inspeccionar,
+            "cobertura_parcial": bool(
+                pendientes or sin_inspeccionar or conflictos or error_ocr
+            ),
+            "conflictos_ocr": conflictos,
+            "error_ocr_hibrido": error_ocr,
+            "duracion_segundos": round(time.perf_counter() - inicio, 3),
+            "trabajadores_encontrados": sum(
+                len(a.get("trabajadores", [])) for a in resultado
+            ),
+            "segundo_motor_habilitado": bool(usar_ocr_alternativo),
+        })
+    return resultado
+
+
 def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
                                 instituciones_candidatas=None,
                                 diagnostico=None, usar_ocr_alternativo=False):
-    """OCR primero en páginas conocidas; rescate geométrico solo si falla.
+    """Texto nativo primero; OCR focalizado y cobertura explícita si es híbrido.
 
-    La etapa rápida no requiere identificar un recibo. Si el OCR produce
-    personas sin traza, se rechaza antes de devolver valores inventados.
+    Si no hay nómina digital, conserva la ruta OCR histórica con rescate.
+    Nunca presenta una lectura de días sin traza como dato confirmado.
     """
     inicio = time.perf_counter()
     # Prioridad P0: la capa de texto vectorial del PDF es MÁS precisa y
@@ -108,18 +253,16 @@ def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
         for x in resultado_digital
     )
     if fuente_salud_confirmada and _nomina_tiene_traza(resultado_digital):
-        if diagnostico is not None:
-            diagnostico.update({
-                "ruta": "texto_pdf_nativo",
-                "duracion_segundos": round(time.perf_counter()-inicio, 3),
-                "trabajadores_encontrados": sum(
-                    len(x.get("trabajadores", [])) for x in resultado_digital
-                ),
-                "paginas_rescate": [],
-                "segundo_motor_habilitado": False,
-            })
-        return resultado_digital
-
+        # No terminar silenciosamente después de la primera planilla digital:
+        # un mismo PDF puede tener otras nóminas escaneadas.
+        return _extraer_hibrido(
+            contenido, resultado_digital,
+            paginas_candidatas=paginas_candidatas,
+            instituciones_candidatas=instituciones_candidatas,
+            diagnostico=diagnostico,
+            usar_ocr_alternativo=usar_ocr_alternativo,
+            inicio=inicio,
+        )
     # Seguro Social sin Fonasa es una referencia útil, pero NO impide que
     # exista una planilla de salud escaneada más adelante: buscar con OCR.
     referencia_seguro_social = resultado_digital
