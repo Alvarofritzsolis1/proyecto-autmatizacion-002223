@@ -1,7 +1,7 @@
 """Benchmark PRIVADO de PDFs reales de cotizaciones (NO guardar corpus en GitHub).
 
 Uso:
-  python scripts/validar_corpus_privado.py --root /ruta/segura --manifest /ruta/segura/verdad.json --salida /ruta/segura/resultado.json
+  python -m scripts.validar_corpus_privado --root /ruta/segura --manifest /ruta/segura/verdad.json --salida /ruta/segura/resultado.json --min-docs 30
 
 Manifest fuera del repositorio:
 {
@@ -32,7 +32,7 @@ from nomina_salud import construir_nomina_salud
 from reporte_nomina_excel import generar_excel_nomina
 
 
-def evaluar(root: Path, manifest: Path) -> dict:
+def evaluar(root: Path, manifest: Path, min_docs: int = 30) -> dict:
     corpus = json.loads(manifest.read_text(encoding="utf-8"))
     documentos = corpus.get("documentos", [])
     if not documentos:
@@ -40,6 +40,7 @@ def evaluar(root: Path, manifest: Path) -> dict:
     antes = time.monotonic()
     estado = {
         "archivos": 0,
+        "documentos_requeridos": min_docs,
         "campos_verificados": 0,
         "dias_correctos": 0,
         "dias_falsos_aceptados": 0,
@@ -140,6 +141,7 @@ def evaluar(root: Path, manifest: Path) -> dict:
     ]
     estado["aprobado_corpus_observado"] = bool(
         estado["archivos"] == len(documentos)
+        and estado["archivos"] >= min_docs
         and estado["campos_verificados"] > 0
         and all(estado[c] == 0 for c in criticos)
     )
@@ -151,8 +153,9 @@ def main():
     p.add_argument("--root",required=True,type=Path)
     p.add_argument("--manifest",required=True,type=Path)
     p.add_argument("--salida",required=True,type=Path)
+    p.add_argument("--min-docs",type=int,default=30)
     a=p.parse_args()
-    r=evaluar(a.root,a.manifest)
+    r=evaluar(a.root,a.manifest,min_docs=a.min_docs)
     a.salida.write_text(json.dumps(r,indent=2,ensure_ascii=False))
     print(json.dumps(r,ensure_ascii=False))
     raise SystemExit(0 if r["aprobado_corpus_observado"] else 2)
