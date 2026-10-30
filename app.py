@@ -30,7 +30,7 @@ from fonasa_validacion import comprobar_traza_dias
 from nomina_salud import construir_nomina_salud
 from reporte_nomina_excel import generar_excel_nomina
 
-VERSION = "19.1-Rescate-de-Planillas"
+VERSION = "19.2-Texto-PDF-y-OCR"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -79,7 +79,7 @@ if not estado_motor.get("contrato_traza"):
         "No se considerarán válidas lecturas sin trazabilidad. "
         + estado_motor.get("error", "")
     )
-st.info("**Modo rápido activo:** búsqueda de planillas Fonasa e Isapre con rescate automático si falla la lectura inicial. Se omiten cuadraturas de montos por defecto.")
+st.info("**Lectura adaptativa:** primero texto digital de Fonasa, después OCR para escaneados. Seguro Social se usa para cotejar días; no certifica por sí solo el pago de salud.")
 st.write("Sube tus documentos y presiona **Analizar documentos**.")
 
 st.subheader("Subir archivos")
