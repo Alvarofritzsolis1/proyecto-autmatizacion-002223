@@ -33,10 +33,67 @@ def normalizar_rut(rut):
     return f"{int(s[:-1]):,}".replace(",", ".") + "-" + digito
 
 
+def _bloques_reconstruidos(pagina):
+    """Reconstruye una fila vertical dividida en bloques por PyMuPDF.
+
+    PyMuPDF >= 1.28 puede separar cada línea de texto con giro 90 grados
+    en bloques sucesivos. Unir exclusivamente fragmentos contiguos
+    con el MISMO borde inferior, a partir de N° y RUT en el bloque inicial.
+    No concatenar bloques de otras filas ni columnas sin esa geometría.
+    """
+    bloques = [
+        b for b in pagina.get_text("blocks", sort=False)
+        if len(b) >= 5 and str(b[4]).strip()
+    ]
+    for bloque in bloques:
+        yield bloque
+        campos = [s.strip() for s in bloque[4].splitlines() if s.strip()]
+        if (
+            len(campos) < 2 or not campos[0].isdigit()
+            or not _RUT.fullmatch(campos[1])
+            or any(x in ("AFP", "IPS", "JC", "JP") for x in campos)
+        ):
+            continue
+        piezas = [bloque]
+        usados = {id(bloque)}
+        borde_x, borde_y = float(bloque[2]), float(bloque[3])
+        for _ in range(12):
+            cercanos = [
+                x for x in bloques
+                if id(x) not in usados
+                and abs(float(x[3]) - borde_y) < 2.5
+                and borde_x - 0.8 <= float(x[0]) <= borde_x + 3.0
+                and float(x[0]) > float(bloque[0])
+            ]
+            if not cercanos:
+                break
+            siguiente = min(cercanos, key=lambda x: float(x[0]))
+            piezas.append(siguiente)
+            usados.add(id(siguiente))
+            borde_x = float(siguiente[2])
+            texto_unido = "\\n".join(p[4].strip() for p in piezas)
+            lineas = [s.strip() for s in texto_unido.splitlines() if s.strip()]
+            if any(x in ("AFP", "IPS") for x in lineas):
+                break
+            if any(
+                x in ("JC", "JP") and i + 1 < len(lineas)
+                for i, x in enumerate(lineas)
+            ):
+                break
+        if len(piezas) > 1:
+            yield (
+                min(float(x[0]) for x in piezas),
+                min(float(x[1]) for x in piezas),
+                max(float(x[2]) for x in piezas),
+                max(float(x[3]) for x in piezas),
+                "\\n".join(x[4].strip() for x in piezas),
+            )
+
+
 def _filas_texto(pagina, tipo):
     """Una fila debe proceder del MISMO bloque de PDF, no de otras columnas."""
     salida = []
-    for bloque in pagina.get_text("blocks", sort=False):
+    for bloque in _bloques_reconstruidos(pagina):
         if len(bloque) < 5:
             continue
         campos = [x.strip() for x in bloque[4].splitlines() if x.strip()]
