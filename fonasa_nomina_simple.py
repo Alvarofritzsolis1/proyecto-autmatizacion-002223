@@ -6,6 +6,7 @@ Un día no legible se devuelve como None, jamás como 0 ni como impago.
 """
 from __future__ import annotations
 
+import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -208,8 +209,27 @@ def _dias_celda(imagen, x0, x1, y0, y1, diagnostico=None):
                 metodo = "ocr_numero"
         elif bruto:
             metodo = "texto_no_numerico"
+    # MODO EXPERIMENTAL. Se habilita SOLO en una ejecución de ensayo con
+    # GALANT_OCR_STRICT_MODE=1. La rama main no altera este comportamiento.
+    # La verificación no corrige datos: rechaza cifras incompatibles con la
+    # estructura del recorte y conserva en la traza el valor OCR original.
+    valor_antes_de_control = valor
+    estado_control = "DESACTIVADO"
+    if os.environ.get("GALANT_OCR_STRICT_MODE") == "1" and valor is not None:
+        try:
+            from ocr_control_estricto import evaluar_recorte
+            valor, estado_control = evaluar_recorte(
+                imagen, x0, x1, y0, y1, valor
+            )
+        except (ImportError, RuntimeError, ValueError, TypeError, cv2.error):
+            valor = None
+            estado_control = "FALLO_CONTROL_ESTRICTO"
+        if valor is None:
+            metodo = "requiere_revision_control_estricto"
     if diagnostico is not None:
         diagnostico.update({
+            "valor_ocr_antes_control": valor_antes_de_control,
+            "estado_control_estricto": estado_control,
             "ocr_bruto": bruto if not doble_uno else "(no requerido)",
             "dos_trazos": bool(doble_uno),
             "glifo_cerrado": bool(glifo_con_hueco),
