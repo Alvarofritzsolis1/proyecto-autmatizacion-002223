@@ -47,6 +47,18 @@ def comprobar_traza_dias(registro: dict) -> dict:
     elif metodo == "ocr_numero":
         estado = "LECTURA_OCR"
         nota = "Leído por Tesseract, pendiente de cotejo con PDF."
+    elif metodo == "texto_pdf_fonasa":
+        estado = "TEXTO_PDF_NATIVO"
+        nota = (
+            "Días extraídos de la capa de texto original del anexo Fonasa. "
+            "No se ha confirmado el pago fuera del comprobante."
+        )
+    elif metodo == "texto_pdf_seguro_social":
+        estado = "REFERENCIA_SEGURO_SOCIAL"
+        nota = (
+            "Días leídos de Seguro Social; no acredita por sí solo "
+            "afiliación ni pago en Fonasa o una Isapre."
+        )
     elif metodo == "ocr_rapidocr":
         estado = "OCR_ALTERNATIVO_REVISAR"
         nota = (

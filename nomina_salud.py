@@ -110,7 +110,19 @@ def construir_nomina_salud(pagos_documentales, trabajadores_anexos):
         )
         verificacion = comprobar_traza_dias(trabajador)
         dias = verificacion.get("valor_confiable")
-        periodo = (recibo or {}).get("periodo", "")
+        periodo = (recibo or {}).get("periodo", "") or trabajador.get(
+            "periodo_documento", ""
+        )
+        periodo_contradiccion = bool(
+            recibo and trabajador.get("periodo_documento")
+            and recibo.get("periodo")
+            and trabajador["periodo_documento"] != recibo["periodo"]
+        )
+        if periodo_contradiccion:
+            motivo = (
+                "Período del anexo diferente del comprobante; "
+                "no acreditar pago sin revisión."
+            )
         pagina_doc = (recibo or {}).get("pagina")
         # Una misma persona puede aparecer en dos períodos o dos Isapres.
         # No mezclar esos registros, ni hacer sumas automáticas de días.
@@ -131,7 +143,9 @@ def construir_nomina_salud(pagos_documentales, trabajadores_anexos):
             "estado_documento": (recibo or {}).get("estado", ""),
             "observacion": motivo or verificacion.get("observacion", ""),
             "conflictos": (
-                any(
+                periodo_contradiccion
+                or verificacion.get("estado") == "REFERENCIA_SEGURO_SOCIAL"
+                or any(
                     str(k).startswith("conflicto_") and bool(v)
                     for k, v in (recibo or {}).items()
                 )
