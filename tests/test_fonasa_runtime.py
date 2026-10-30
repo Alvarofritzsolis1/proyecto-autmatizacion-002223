@@ -243,3 +243,55 @@ def test_detector_raster_distingue_logo_de_pagina_escaneada():
     assert paginas == [2]
     assert excedentes == 0
     assert inciertas == []
+
+
+def test_pdf_hibrido_contradiccion_en_mismos_dias_bloquea_resultado():
+    original = _falsa_nomina_digital()
+    contradictorio = _falsa_nomina_ocr()
+    contradictorio[0]["pagina"] = 1
+    contradictorio[0]["trabajadores"][0]["trabajador_rut"] = "RUT_FICTICIO_A"
+    diagnostico = {}
+    lector = SimpleNamespace(
+        extraer_nomina_fonasa=Mock(return_value=contradictorio)
+    )
+    with patch(
+        "planillas_texto_digital.extraer_nominas_pdf_texto",
+        return_value=original,
+    ), patch.object(
+        runtime, "_paginas_raster", return_value=([1], 0, [])
+    ), patch.object(
+        runtime, "cargar_lector_fonasa", return_value=lector
+    ):
+        resultado = runtime.extraer_fonasa_con_contrato(
+            b"PDF-FICTICIO", diagnostico=diagnostico
+        )
+    persona = resultado[0]["trabajadores"][0]
+    assert persona["dias_trabajados_fonasa"] is None
+    assert persona["dias_requieren_revision"] is True
+    assert diagnostico["conflictos_ocr"] == 1
+    assert diagnostico["cobertura_parcial"]
+
+
+def test_pdf_hibrido_caida_ocr_no_borra_nomina_digital():
+    lector = SimpleNamespace(
+        extraer_nomina_fonasa=Mock(
+            side_effect=RuntimeError("motor no disponible")
+        )
+    )
+    diagnostico = {}
+    with patch(
+        "planillas_texto_digital.extraer_nominas_pdf_texto",
+        return_value=_falsa_nomina_digital(),
+    ), patch.object(
+        runtime, "_paginas_raster", return_value=([2], 0, [])
+    ), patch.object(
+        runtime, "cargar_lector_fonasa", return_value=lector
+    ):
+        resultado = runtime.extraer_fonasa_con_contrato(
+            b"PDF-FICTICIO", diagnostico=diagnostico
+        )
+    assert len(resultado) == 1
+    assert resultado[0]["trabajadores"][0]["dias_trabajados_fonasa"] == 24
+    assert diagnostico["paginas_pendientes"] == [2]
+    assert diagnostico["cobertura_parcial"]
+    assert "motor no disponible" in diagnostico["error_ocr_hibrido"]
