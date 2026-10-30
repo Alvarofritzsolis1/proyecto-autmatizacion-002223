@@ -71,7 +71,7 @@ def _bloques_reconstruidos(pagina):
             piezas.append(siguiente)
             usados.add(id(siguiente))
             borde_x = float(siguiente[2])
-            texto_unido = "\\n".join(p[4].strip() for p in piezas)
+            texto_unido = "\n".join(p[4].strip() for p in piezas)
             lineas = [s.strip() for s in texto_unido.splitlines() if s.strip()]
             if any(x in ("AFP", "IPS") for x in lineas):
                 break
@@ -86,7 +86,7 @@ def _bloques_reconstruidos(pagina):
                 min(float(x[1]) for x in piezas),
                 max(float(x[2]) for x in piezas),
                 max(float(x[3]) for x in piezas),
-                "\\n".join(x[4].strip() for x in piezas),
+                "\n".join(x[4].strip() for x in piezas),
             )
 
 
