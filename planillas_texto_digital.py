@@ -160,6 +160,80 @@ def _filas_texto(pagina, tipo):
             ),
             "metodo_dias": metodo,
         })
+    # PyMuPDF 1.28 puede dividir filas con glifos rotados entre varios
+    # BLOQUES. Su flujo textual mantiene las líneas contiguas, por eso
+    # se permite una segunda lectura DIGITAL sin rasterizar ni usar OCR.
+    identificados = {x["trabajador_rut"] for x in salida}
+    lineas = [
+        x.strip() for x in pagina.get_text("text", sort=False).splitlines()
+        if x.strip()
+    ]
+    for inicio in range(len(lineas) - 2):
+        if (
+            not lineas[inicio].isdigit()
+            or not _RUT.fullmatch(lineas[inicio + 1])
+        ):
+            continue
+        rut = normalizar_rut(lineas[inicio + 1])
+        if rut in identificados:
+            continue
+        limite = min(len(lineas), inicio + 17)
+        for j in range(inicio + 2, limite - 1):
+            if (
+                lineas[j].isdigit() and j + 1 < len(lineas)
+                and _RUT.fullmatch(lineas[j + 1])
+            ):
+                limite = j
+                break
+        fragmento = lineas[inicio:limite]
+        if tipo == "Fonasa":
+            pos = next(
+                (k for k, x in enumerate(fragmento)
+                 if x in ("AFP", "IPS")), None
+            )
+            if pos is None or pos < 5:
+                continue
+            texto_dias = fragmento[pos - 1]
+            nombres = fragmento[2:pos - 1]
+            metodo = "texto_pdf_fonasa"
+        else:
+            pos = next(
+                (k for k, x in enumerate(fragmento)
+                 if x in ("JC", "JP")), None
+            )
+            if pos is None or pos < 5 or pos + 1 >= len(fragmento):
+                continue
+            texto_dias = fragmento[pos + 1]
+            nombres = [fragmento[2]]
+            metodo = "texto_pdf_seguro_social"
+        if not re.fullmatch(r"[1-9]|[12]\d|3[01]", texto_dias):
+            continue
+        if not nombres or not all(
+            re.search(r"[A-Za-zÁÉÍÓÚÑ]", x) for x in nombres
+        ):
+            continue
+        dias = int(texto_dias)
+        salida.append({
+            "trabajador_rut": rut,
+            "trabajador_nombre": " ".join(nombres).upper(),
+            "dias_trabajados_fonasa": dias,
+            "filas_movimientos": 1,
+            "dias_requieren_revision": False,
+            "traza_dias": [{
+                "fila": int(fragmento[0]),
+                "valor": dias,
+                "metodo": metodo,
+                "texto_fuente": texto_dias,
+                "pagina": pagina.number + 1,
+                "tipo_segmentacion": "lineas_pdf",
+            }],
+            "fuente": (
+                "Fonasa - texto PDF" if tipo == "Fonasa"
+                else "Seguro Social - texto PDF"
+            ),
+            "metodo_dias": metodo,
+        })
+        identificados.add(rut)
     return salida
 
 
