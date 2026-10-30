@@ -77,6 +77,17 @@ def test_62_dias_y_orientaciones_digitales(dia, rotacion):
     r = extraer_nominas_pdf_texto(
         construir_pdf(dias=dia, rotacion=rotacion)
     )
+    if not r:
+        muestra = fitz.open(
+            stream=construir_pdf(dias=dia, rotacion=rotacion),
+            filetype="pdf"
+        )
+        detalle = [
+            (repr(x[4][:100]), tuple(round(float(z), 1) for z in x[:4]))
+            for x in muestra[1].get_text("blocks")
+        ]
+        muestra.close()
+        pytest.fail("PDF sintético rotado no leído; bloques: " + repr(detalle))
     assert len(r) == 1
     assert r[0]["pagina"] == 2
     assert r[0]["trabajadores"][0]["dias_trabajados_fonasa"] == dia
