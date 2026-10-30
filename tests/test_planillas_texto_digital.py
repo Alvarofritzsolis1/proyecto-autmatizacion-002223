@@ -53,7 +53,7 @@ def construir_pdf(
         "AFP\n442.842\n30.999\n0"
     )
     if rotacion == 90:
-        p.insert_text((350, 100), fila, rotate=90, fontsize=8)
+        p.insert_text((350, 500), fila, rotate=90, fontsize=8)
     else:
         p.insert_text((120, 170), fila, fontsize=8)
     if segundo is not None:
