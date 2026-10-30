@@ -226,3 +226,20 @@ def test_pdf_hibrido_presupuesto_y_paginas_pendientes():
     assert diagnostico["paginas_sin_inspeccionar"] == 1
     assert 13 in diagnostico["paginas_pendientes"]
     assert diagnostico["cobertura_parcial"]
+
+
+def test_detector_raster_distingue_logo_de_pagina_escaneada():
+    import fitz
+    with fitz.open() as pdf:
+        img = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 4, 4), False)
+        img.clear_with(255)
+        pagina = pdf.new_page(width=300, height=200)
+        pagina.insert_text((20, 30), "PAGINA DIGITAL")
+        pagina.insert_image(fitz.Rect(10, 10, 30, 30), pixmap=img)
+        pagina = pdf.new_page(width=300, height=200)
+        pagina.insert_image(pagina.rect, pixmap=img)
+        contenido = pdf.tobytes()
+    paginas, excedentes, inciertas = runtime._paginas_raster(contenido)
+    assert paginas == [2]
+    assert excedentes == 0
+    assert inciertas == []
