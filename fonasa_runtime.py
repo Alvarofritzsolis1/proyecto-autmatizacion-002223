@@ -170,11 +170,9 @@ def _extraer_hibrido(contenido, digital, *, paginas_candidatas,
                      usar_ocr_alternativo, inicio):
     """Ejecuta OCR únicamente cuando hay páginas raster junto a texto nativo."""
     paginas_raster, sin_inspeccionar, inciertas = _paginas_raster(contenido)
-    paginas_digitales = {a.get("pagina") for a in digital}
-    candidatas = [
-        p for p in sorted(set(paginas_raster + inciertas))
-        if p not in paginas_digitales
-    ]
+    # Una misma página puede contener texto nativo y un anexo como imagen:
+    # revisarla también evita perder trabajadores de una segunda nómina.
+    candidatas = sorted(set(paginas_raster + inciertas))
     limite_ocr = 8  # Control explícito de memoria / duración del servidor.
     por_analizar = candidatas[:limite_ocr]
     pendientes = set(candidatas[limite_ocr:])
@@ -204,7 +202,11 @@ def _extraer_hibrido(contenido, digital, *, paginas_candidatas,
     pendientes.update(set(por_analizar) - leidas)
     if diagnostico is not None:
         diagnostico.update({
-            "ruta": "texto_pdf_mas_ocr_hibrido",
+            "ruta": (
+                "texto_pdf_mas_ocr_hibrido" if candidatas
+                else "texto_pdf_nativo"
+            ),
+            "paginas_rescate": [],
             "paginas_imagen": paginas_raster,
             "paginas_ocr_intentadas": por_analizar,
             "paginas_pendientes": sorted(pendientes),
@@ -226,10 +228,10 @@ def _extraer_hibrido(contenido, digital, *, paginas_candidatas,
 def extraer_fonasa_con_contrato(contenido: bytes, *, paginas_candidatas=None,
                                 instituciones_candidatas=None,
                                 diagnostico=None, usar_ocr_alternativo=False):
-    """OCR primero en páginas conocidas; rescate geométrico solo si falla.
+    """Texto nativo primero; OCR focalizado y cobertura explícita si es híbrido.
 
-    La etapa rápida no requiere identificar un recibo. Si el OCR produce
-    personas sin traza, se rechaza antes de devolver valores inventados.
+    Si no hay nómina digital, conserva la ruta OCR histórica con rescate.
+    Nunca presenta una lectura de días sin traza como dato confirmado.
     """
     inicio = time.perf_counter()
     # Prioridad P0: la capa de texto vectorial del PDF es MÁS precisa y
