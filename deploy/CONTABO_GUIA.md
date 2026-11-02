@@ -1,8 +1,11 @@
 # GALANT en VPS Contabo (Ubuntu 22.04 / 24.04)
 
 **Estado:** esta rama prepara el despliegue, pero no instala nada en tu VPS.
-La versión usada procede de `main` (19.2); la mejora OCR 19.3 está
-separada en PR #26, no debe darse por instalada. No subir PDFs privados a GitHub.
+Esta rama contiene la versión VPS con interfaz renovada (dos áreas de carga)
+y el lector híbrido 19.3 integrado desde PR #26, pero **no está en main**.
+Para usarla en Contabo debes clonar ESTA rama y reconstruir la imagen Docker.
+No dar por validado todo el OCR antes de comparar PDF reales.
+No subir PDFs privados a GitHub.
 
 ## Arquitectura
 
@@ -115,7 +118,7 @@ su DNS. Sin un nombre DNS válido, la emisión HTTPS pública puede fallar.
 Caddy obtiene y renueva el certificado al ver el DNS correcto y los
 puertos TCP 80/443 abiertos.
 
-## 6. Descargar el proyecto preparado
+## 6. Descargar el proyecto preparado (rama VPS actualizada)
 
 Conectado por SSH como **galantadmin**:
 
@@ -125,6 +128,14 @@ sudo chown "$USER":"$USER" /opt/galant
 git clone -b deploy/contabo-vps-seguro-20261102 https://github.com/Alvarofritzsolis1/proyecto-autmatizacion-002223.git /opt/galant
 cd /opt/galant
 git status --short --branch
+
+# Si ya habías clonado esta rama antes de la mejora:
+# cd /opt/galant
+# git fetch origin
+# git pull --ff-only origin deploy/contabo-vps-seguro-20261102
+# Si clonaste main, primero selecciona la rama:
+# git fetch origin
+# git switch --track origin/deploy/contabo-vps-seguro-20261102
 cp .env.example .env
 chmod 600 .env
 ```
