@@ -55,6 +55,14 @@ jobs:
           done
           docker logs galant-contabo-smoke
           exit 1
-      - name: Retirar contenedor de prueba
+      - name: Arrancar Compose con volumen OCR y sistema de archivos protegido
+        run: |
+          docker tag galant-contabo:ci galant-galant:latest
+          docker compose up --detach --no-build --wait --wait-timeout 120 galant
+          docker compose exec -T galant python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5).read()"
+          docker compose exec -T galant python -c "import os; from pathlib import Path; p=Path.home()/'.cache'/'galant-ci-write-test'; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('OK'); assert p.read_text()=='OK'; p.unlink(); print('PERSISTENT OCR CACHE WRITABLE')"
+      - name: Retirar contenedores de prueba
         if: always()
-        run: docker rm -f galant-contabo-smoke || true
+        run: |
+          docker compose down --remove-orphans || true
+          docker rm -f galant-contabo-smoke || true
