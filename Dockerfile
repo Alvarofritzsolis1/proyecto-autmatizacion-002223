@@ -27,6 +27,7 @@ COPY . /app
 RUN useradd --uid 10001 --create-home --home-dir /home/galant \
        --shell /usr/sbin/nologin galant \
     && mkdir -p /home/galant/.cache /home/galant/.streamlit \
+    && cp /app/config.toml /home/galant/.streamlit/config.toml \
     && chown -R galant:galant /home/galant /app
 
 USER galant
