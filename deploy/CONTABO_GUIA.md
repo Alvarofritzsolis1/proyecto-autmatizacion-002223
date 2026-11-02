@@ -7,6 +7,49 @@ Para usarla en Contabo debes clonar ESTA rama y reconstruir la imagen Docker.
 No dar por validado todo el OCR antes de comparar PDF reales.
 No subir PDFs privados a GitHub.
 
+## Instalacion facil en un solo comando (recomendado)
+
+Si ya tienes Docker y clonaste la rama VPS, en el servidor:
+
+```bash
+cd /opt/galant
+git fetch origin
+git pull --ff-only origin deploy/contabo-vps-seguro-20261102
+bash deploy/galant-facil.sh
+```
+
+El asistente muestra estas opciones:
+
+1. **Prueba privada** (sin DNS). Arranca GALANT en 127.0.0.1:18501,
+   sin publicar el puerto 8501. En **Windows PowerShell**, abrir una
+   segunda sesion con `ssh -L 18501:127.0.0.1:18501 root@89.117.144.140`
+   y visitar `http://localhost:18501`. Mantener SSH abierta.
+   Este modo usa tunel seguro, pero sin contrasena web: no compartir el
+   puerto local ni subir documentos laborales hasta validar privacidad.
+2. **Publicar HTTPS** SOLO cuando `galant.dpdns.org` resuelva **unicamente**
+   a 89.117.144.140 y exista un hash de Caddy en `.env`. El asistente
+   aborta en caso contrario y no publica un acceso inseguro.
+3. **DNS**: muestra la IP publica sin modificar DigitalPlat.
+4. **Estado**: muestra contenedores y resultado DNS.
+
+**OJO:** el panel DigitalPlat puede mostrar "Aplicado a servidores DNS"
+aunque el DNS publico permanezca en 185.27.134.160. Es posible que el
+hosting gratuito conserve una delegacion NS distinta de la zona donde
+editaste el registro. Antes de cambiar mas datos DNS, contrasta el
+servidor autoritativo y la delegacion:
+
+```bash
+sudo apt install -y dnsutils
+dig +trace galant.dpdns.org A
+dig @1.1.1.1 galant.dpdns.org A +short
+dig @8.8.8.8 galant.dpdns.org A +short
+```
+
+El mismo registro A debe resolverse desde los NS realmente delegados.
+No reemplazar NS por una IP. Si el hostname delega a los DNS del
+hosting gratuito, editar su zona DNS o cambiar la delegacion al
+servicio DNS que realmente contiene tu registro A.
+
 ## Arquitectura
 
 Navegador -- HTTPS + contraseña --> Caddy (puertos 80/443 públicos) -->
