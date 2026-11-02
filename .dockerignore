@@ -1,0 +1,22 @@
+# Nunca incluir datos de contratistas, claves o pruebas privadas en la imagen.
+.git
+.github
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.pdf
+*.xlsx
+*.xls
+*.csv
+!topes_imponibles_plantilla.csv
+*.joblib
+datos_privados/
+documentos/
+modelos/
+correcciones_privadas*.json
+informe_calidad_nocturno.json
