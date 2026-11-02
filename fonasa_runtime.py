@@ -170,9 +170,31 @@ def _extraer_hibrido(contenido, digital, *, paginas_candidatas,
                      usar_ocr_alternativo, inicio):
     """Ejecuta OCR únicamente cuando hay páginas raster junto a texto nativo."""
     paginas_raster, sin_inspeccionar, inciertas = _paginas_raster(contenido)
-    # Una misma página puede contener texto nativo y un anexo como imagen:
-    # revisarla también evita perder trabajadores de una segunda nómina.
-    candidatas = sorted(set(paginas_raster + inciertas))
+    # Una misma página puede contener texto nativo y un anexo como imagen.
+    # IMPORTANTE: detectar Fonasa digital NO implica que la Isapre del mismo
+    # archivo sea digital ni que el lector nativo pueda interpretar su anexo.
+    # Priorizar páginas Isapre explícitamente mencionadas por sus recibos,
+    # incluso cuando esas páginas tengan texto digital y no sean raster.
+    instituciones_nativas = {
+        str(a.get("institucion_salud", "")).strip().lower() for a in digital
+    }
+    paginas_salud_pendientes = set()
+    for pagina_recibo, institucion in dict(
+        instituciones_candidatas or {}
+    ).items():
+        nombre = str(institucion).strip().lower()
+        if not nombre.startswith("isapre") or nombre in instituciones_nativas:
+            continue
+        if isinstance(pagina_recibo, int) and pagina_recibo >= 1:
+            # Las pistas son de comprobantes; el anexo suele ser la página
+            # inmediatamente siguiente (comprobante 1-based -> anexo +1).
+            paginas_salud_pendientes.add(pagina_recibo + 1)
+
+    prioritarias = sorted(paginas_salud_pendientes)
+    candidatas = prioritarias + [
+        p for p in sorted(set(paginas_raster + inciertas))
+        if p not in paginas_salud_pendientes
+    ]
     limite_ocr = 8  # Control explícito de memoria / duración del servidor.
     por_analizar = candidatas[:limite_ocr]
     pendientes = set(candidatas[limite_ocr:])
@@ -208,6 +230,7 @@ def _extraer_hibrido(contenido, digital, *, paginas_candidatas,
             ),
             "paginas_rescate": [],
             "paginas_imagen": paginas_raster,
+            "paginas_isapre_pendientes": prioritarias,
             "paginas_ocr_intentadas": por_analizar,
             "paginas_pendientes": sorted(pendientes),
             "paginas_sin_inspeccionar": sin_inspeccionar,
