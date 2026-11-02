@@ -27,6 +27,11 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config --quiet
+      - name: Validar instalador facil y Compose privado
+        run: |
+          bash -n deploy/galant-facil.sh
+          docker compose -f compose.yaml -f deploy/compose.private.yaml config --quiet
+          test "$(docker compose -f compose.yaml -f deploy/compose.private.yaml config --format json | python -c 'import json,sys; x=json.load(sys.stdin); print(x["services"]["galant"]["ports"][0]["host_ip"])')" = "127.0.0.1"
       - name: Comprobar Caddyfile con credenciales solo de prueba
         run: |
           HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext 'PruebaTemporalNoEsUnaClaveReal')"
