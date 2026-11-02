@@ -34,7 +34,7 @@ services:
       DATABASE_URL: postgresql+psycopg://galant:${POSTGRES_PASSWORD}@db:5432/galant
       DOCUMENT_DIR: /data/documents
       OCR_LANG: ${OCR_LANG:-spa+eng}
-      COOKIE_SECURE: "false"
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       MAX_UPLOAD_MB: "15"
       MAX_PDF_PAGES: "20"
     volumes:
