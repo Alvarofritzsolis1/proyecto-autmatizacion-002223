@@ -1,0 +1,60 @@
+name: GALANT - Contabo VPS Docker smoke
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - compose.yaml
+      - .dockerignore
+      - .env.example
+      - deploy/**
+      - requirements.txt
+      - app.py
+      - .github/workflows/contabo-vps-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contabo-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validar sintaxis de Compose sin publicar secretos
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Comprobar Caddyfile con credenciales solo de prueba
+        run: |
+          HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext 'PruebaTemporalNoEsUnaClaveReal')"
+          docker run --rm \
+            -e GALANT_DOMAIN=localhost \
+            -e GALANT_USER=usuario_prueba \
+            -e GALANT_AUTH_HASH="$HASH" \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy adapt --config /etc/caddy/Caddyfile > /dev/null
+      - name: Construir imagen real de GALANT con Tesseract y RapidOCR
+        run: docker build --tag galant-contabo:ci .
+      - name: Verificar importaciones OCR y lenguajes
+        run: |
+          docker run --rm galant-contabo:ci python -c "import fitz, pytesseract, cv2, rapidocr, onnxruntime, streamlit; print('GALANT OCR IMPORTS OK')"
+          docker run --rm galant-contabo:ci sh -c "tesseract --list-langs 2>&1 | grep -q '^spa$'"
+          docker run --rm galant-contabo:ci sh -c "tesseract --list-langs 2>&1 | grep -q '^eng$'"
+      - name: Arrancar Streamlit aislado y comprobar health HTTP
+        run: |
+          docker run -d --name galant-contabo-smoke -p 127.0.0.1:18501:8501 galant-contabo:ci
+          for i in $(seq 1 35); do
+            if curl --fail --silent http://127.0.0.1:18501/_stcore/health >/dev/null; then
+              echo "GALANT UP"
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs galant-contabo-smoke
+          exit 1
+      - name: Retirar contenedor de prueba
+        if: always()
+        run: docker rm -f galant-contabo-smoke || true
