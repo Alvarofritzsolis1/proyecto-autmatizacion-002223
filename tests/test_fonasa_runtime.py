@@ -295,3 +295,63 @@ def test_pdf_hibrido_caida_ocr_no_borra_nomina_digital():
     assert diagnostico["paginas_pendientes"] == [2]
     assert diagnostico["cobertura_parcial"]
     assert "motor no disponible" in diagnostico["error_ocr_hibrido"]
+
+
+
+def test_pdf_fonasa_digital_tambien_inspecciona_isapre_digital():
+    """Encontrar Fonasa NO debe omitir Isapre con texto digital."""
+    digital = _falsa_nomina_digital()
+    lector = SimpleNamespace(extraer_nomina_fonasa=Mock(return_value=[{
+        "pagina": 4,
+        "institucion_salud": "Isapre Colmena",
+        "trabajadores": [{
+            "trabajador_rut": "RUT_ISAPRE_FICTICIO",
+            "trabajador_nombre": "PRUEBA ISAPRE",
+            "dias_trabajados_fonasa": None,
+            "traza_dias": [{
+                "valor": None,
+                "metodo": "dias_no_informados_en_planilla_isapre",
+            }],
+        }],
+    }]))
+    diagnostico = {}
+    with patch(
+        "planillas_texto_digital.extraer_nominas_pdf_texto",
+        return_value=digital,
+    ), patch.object(
+        runtime, "_paginas_raster", return_value=([], 0, [])
+    ), patch.object(
+        runtime, "cargar_lector_fonasa", return_value=lector
+    ):
+        resultado = runtime.extraer_fonasa_con_contrato(
+            b"PDF-FICTICIO",
+            instituciones_candidatas={3: "Isapre Colmena"},
+            diagnostico=diagnostico,
+        )
+    assert {a["institucion_salud"] for a in resultado} == {
+        "Fonasa", "Isapre Colmena"
+    }
+    assert diagnostico["paginas_isapre_pendientes"] == [4]
+    assert diagnostico["paginas_ocr_intentadas"] == [4]
+    assert not diagnostico["cobertura_parcial"]
+
+
+def test_pdf_con_isapre_digital_no_leida_muestra_alerta():
+    lector = SimpleNamespace(extraer_nomina_fonasa=Mock(return_value=[]))
+    diagnostico = {}
+    with patch(
+        "planillas_texto_digital.extraer_nominas_pdf_texto",
+        return_value=_falsa_nomina_digital(),
+    ), patch.object(
+        runtime, "_paginas_raster", return_value=([], 0, [])
+    ), patch.object(
+        runtime, "cargar_lector_fonasa", return_value=lector
+    ):
+        resultado = runtime.extraer_fonasa_con_contrato(
+            b"PDF-FICTICIO",
+            instituciones_candidatas={3: "Isapre Consalud"},
+            diagnostico=diagnostico,
+        )
+    assert len(resultado) == 1
+    assert diagnostico["paginas_pendientes"] == [4]
+    assert diagnostico["cobertura_parcial"]
