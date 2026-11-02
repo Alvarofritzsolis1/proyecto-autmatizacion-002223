@@ -1,6 +1,11 @@
 .env
+.env.preview
+.env.*
+!.env.example
 storage/
+preview-storage/
 backups/
+preview-backups/
 *.db
 *.sqlite
 *.sqlite3
