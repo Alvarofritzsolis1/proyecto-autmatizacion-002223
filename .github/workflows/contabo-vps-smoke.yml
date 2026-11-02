@@ -43,6 +43,9 @@ jobs:
           docker run --rm galant-contabo:ci python -c "import fitz, pytesseract, cv2, rapidocr, onnxruntime, streamlit; print('GALANT OCR IMPORTS OK')"
           docker run --rm galant-contabo:ci sh -c "tesseract --list-langs 2>&1 | grep -q '^spa$'"
           docker run --rm galant-contabo:ci sh -c "tesseract --list-langs 2>&1 | grep -q '^eng$'"
+      - name: Ejecutar UI de GALANT (no solo health del servidor)
+        run: |
+          docker run --rm galant-contabo:ci python -c "from streamlit.testing.v1 import AppTest; a=AppTest.from_file('/app/app.py', default_timeout=60).run(); assert not a.exception, repr(a.exception); print('GALANT STREAMLIT UI OK')"
       - name: Arrancar Streamlit aislado y comprobar health HTTP
         run: |
           docker run -d --name galant-contabo-smoke -p 127.0.0.1:18501:8501 galant-contabo:ci
