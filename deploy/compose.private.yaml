@@ -1,0 +1,9 @@
+# Prueba privada GALANT: solo accesible desde el propio VPS o túnel SSH.
+# Uso: docker compose -f compose.yaml -f deploy/compose.private.yaml up -d --build galant
+services:
+  galant:
+    ports:
+      - "127.0.0.1:18501:8501"
+    environment:
+      STREAMLIT_BROWSER_SERVER_ADDRESS: "localhost"
+      STREAMLIT_BROWSER_SERVER_PORT: "18501"
