@@ -2,7 +2,7 @@ import {useEffect,useState,type ReactNode} from 'react'
 import {Link,NavLink,Navigate,Route,Routes,useNavigate,useParams} from 'react-router-dom'
 import {useMutation,useQuery,useQueryClient} from '@tanstack/react-query'
 import {Activity,ArrowDownToLine,ArrowLeft,ArrowRight,BriefcaseBusiness,CheckCircle2,ChevronRight,
-  CircleAlert,Clock3,CloudUpload,FileCheck2,FileClock2,FileSearch2,Files,LayoutDashboard,
+  CircleAlert,Clock3,CloudUpload,FileCheck2,FileClock,FileSearch2,Files,LayoutDashboard,
   LockKeyhole,LogOut,Menu,Moon,Plus,RefreshCcw,Search,ShieldCheck,Sun,Users,Zap} from 'lucide-react'
 import {auth,contractors,dashboard,documents,type Contractor,type Document,type Profile} from './api'
 
@@ -13,7 +13,7 @@ const links=[
   {to:'f301',label:'Certificados F30-1',icon:Files},
   {to:'independent',label:'Trabajadores independientes',icon:Users},
   {to:'contractors',label:'Gestión de contratistas',icon:BriefcaseBusiness},
-  {to:'history',label:'Historial y auditoría',icon:FileClock2},
+  {to:'history',label:'Historial y auditoría',icon:FileClock},
 ]
 const types=[{id:'cotizaciones',title:'Cotizaciones previsionales',sub:'Previred y comprobantes'},
              {id:'f30_1',title:'Certificado F30-1',sub:'Análisis independiente'},

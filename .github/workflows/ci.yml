@@ -13,7 +13,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m compileall -q app alembic
-      - run: OCR_LANG=eng pytest -q
+      - run: OCR_LANG=eng python -m pytest -q
   frontend:
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: apps/frontend}}
