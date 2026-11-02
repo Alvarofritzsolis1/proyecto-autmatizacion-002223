@@ -47,7 +47,8 @@ st.markdown("""
   .stButton button[kind="primary"] {border-radius: 10px; font-weight: 700;}
 </style>
 """, unsafe_allow_html=True)
-st.title("GALANT · Control documental")
+st.title("GALANT")
+st.markdown("**Control documental de contratistas**")
 st.caption("Revisión de cotizaciones y certificados laborales | Implementación VPS")
 def _estado_motor():
     """Incluye huella del BYTECODE activo, no solo código fuente en disco."""
