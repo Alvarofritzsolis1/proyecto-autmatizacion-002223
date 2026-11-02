@@ -22,6 +22,10 @@ services:
     cap_drop:
       - ALL
     shm_size: "256m"
+    environment:
+      # Host publico requerido para que WebSocket y subida de PDF respeten CORS/XSRF.
+      STREAMLIT_BROWSER_SERVER_ADDRESS: ${GALANT_DOMAIN:?Definir GALANT_DOMAIN en .env}
+      STREAMLIT_BROWSER_SERVER_PORT: "443"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5)"]
       interval: 30s
