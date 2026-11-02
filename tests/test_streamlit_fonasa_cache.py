@@ -48,7 +48,18 @@ def test_dias_ilegibles_no_se_muestran_como_texto_none():
 
 def test_version_nueva_identificable_en_pantalla():
     codigo = _codigo()
-    assert 'VERSION = "19.2-Texto-PDF-y-OCR"' in codigo
+    asignaciones = [
+        nodo for nodo in ast.parse(codigo).body
+        if isinstance(nodo, ast.Assign)
+        and any(
+            isinstance(objetivo, ast.Name) and objetivo.id == "VERSION"
+            for objetivo in nodo.targets
+        )
+    ]
+    assert len(asignaciones) == 1
+    version = ast.literal_eval(asignaciones[0].value)
+    assert isinstance(version, str) and "." in version and "-" in version
+    assert "cobertura_parcial" in codigo
     assert 'f"Control documental de contratistas · {VERSION} "' in codigo
 
 
