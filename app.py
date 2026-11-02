@@ -30,7 +30,7 @@ from fonasa_validacion import comprobar_traza_dias
 from nomina_salud import construir_nomina_salud
 from reporte_nomina_excel import generar_excel_nomina
 
-VERSION = "19.2-Texto-PDF-y-OCR"
+VERSION = "19.3-VPS-OCR-Hibrido"
 MAX_ARCHIVOS = 20
 MAX_BYTES_TOTAL = 60 * 1024 * 1024
 
@@ -40,7 +40,16 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
 )
+st.markdown("""
+<style>
+  .block-container {max-width: 1320px; padding-top: 1.6rem;}
+  div[data-testid="stMetric"] {border: 1px solid rgba(140,150,160,.25); border-radius: 12px; padding: 12px;}
+  .stButton button[kind="primary"] {border-radius: 10px; font-weight: 700;}
+</style>
+""", unsafe_allow_html=True)
 st.title("GALANT")
+st.markdown("**Control documental de contratistas**")
+st.caption("Revisión de cotizaciones y certificados laborales | Implementación VPS")
 def _estado_motor():
     """Incluye huella del BYTECODE activo, no solo código fuente en disco."""
     try:
@@ -79,18 +88,48 @@ if not estado_motor.get("contrato_traza"):
         "No se considerarán válidas lecturas sin trazabilidad. "
         + estado_motor.get("error", "")
     )
-st.info("**Lectura adaptativa:** primero texto digital de Fonasa, después OCR para escaneados. Seguro Social se usa para cotejar días; no certifica por sí solo el pago de salud.")
-st.write("Sube tus documentos y presiona **Analizar documentos**.")
-
-st.subheader("Subir archivos")
-archivos_subidos = st.file_uploader(
-    "PDF, Excel o CSV de F30-1 y cotizaciones",
-    type=["pdf", "xlsx", "xls", "csv"],
-    accept_multiple_files=True,
-    max_upload_size=25,
-    help=f"Hasta {MAX_ARCHIVOS} archivos y 60 MB en total. Los PDF escaneados usan OCR.",
+st.info("**Lectura adaptativa:** texto nativo primero, OCR adicional en páginas de imagen de PDF mixtos y alerta si queda alguna página por revisar. Seguro Social no certifica por sí solo el pago de salud.")
+st.markdown("### 1. Cargar documentos")
+st.caption(
+    "Dos áreas independientes. Puedes analizar solo cotizaciones, solo F30-1 "
+    "o ambos documentos para comparar sus antecedentes."
 )
-archivos = list(archivos_subidos or [])
+col_cotizaciones, col_f301 = st.columns(2, gap="large")
+with col_cotizaciones:
+    with st.container(border=True):
+        st.markdown("#### Cotizaciones / Previred")
+        st.caption("Comprobantes de pago y nóminas AFP, Fonasa, Isapres y mutualidad.")
+        archivos_cotizaciones = st.file_uploader(
+            "Subir cotizaciones (PDF o planillas)",
+            type=["pdf", "xlsx", "xls", "csv"],
+            accept_multiple_files=True,
+            max_upload_size=25,
+            key="galant_cotizaciones",
+            help="PDF digitales y escaneados. Máximo 25 MB por archivo.",
+        )
+        st.caption(f"{len(archivos_cotizaciones or [])} archivo(s) para cotizaciones")
+with col_f301:
+    with st.container(border=True):
+        st.markdown("#### Certificados F30-1")
+        st.caption("Antecedentes laborales y previsionales del contratista.")
+        archivos_f301 = st.file_uploader(
+            "Subir certificados F30-1 (PDF)",
+            type=["pdf"],
+            accept_multiple_files=True,
+            max_upload_size=25,
+            key="galant_f301",
+            help="Certificados PDF. GALANT valida el contenido al analizarlos.",
+        )
+        st.caption(f"{len(archivos_f301 or [])} archivo(s) F30-1")
+
+# La separación es visual. El contenido se valida en el pipeline original:
+# colocar un PDF en el área equivocada no altera el tipo documental real.
+archivos_subidos = list(archivos_cotizaciones or []) + list(archivos_f301 or [])
+archivos = list(archivos_subidos)
+c1, c2, c3 = st.columns(3)
+c1.metric("Cotizaciones cargadas", len(archivos_cotizaciones or []))
+c2.metric("F30-1 cargados", len(archivos_f301 or []))
+c3.metric("Total de archivos", len(archivos))
 limite_excedido = len(archivos) > MAX_ARCHIVOS or sum(a.size for a in archivos) > MAX_BYTES_TOTAL
 if limite_excedido:
     st.error("Se excedió el máximo de 20 archivos o 60 MB. Divide la carga.")
@@ -158,8 +197,10 @@ def _firma_actual():
     h.update(str(bool(usar_rapidocr)).encode())
     return h.hexdigest()
 
+st.markdown("### 2. Analizar y revisar resultados")
 if st.button(
     "Analizar documentos", type="primary", disabled=not archivos or limite_excedido,
+    use_container_width=True,
 ):
     st.session_state.pop("reporte_galant", None)
     # Cada clic es una solicitud explícita de REANÁLISIS. No reutilizar
@@ -384,6 +425,39 @@ if st.button(
     nomina_unificada, alertas_salud = construir_nomina_salud(
         pagos_documentales, nominas_fonasa
     )
+    # Una lectura nativa exitosa no demuestra que un PDF mixto esté
+    # completamente revisado. La advertencia también entra en el XLSX.
+    for evidencia in pagos_documentales:
+        diagnostico = evidencia.get("diagnostico_nomina", {})
+        if not diagnostico.get("cobertura_parcial"):
+            continue
+        pendientes = diagnostico.get("paginas_pendientes", [])
+        sin_inspeccionar = diagnostico.get("paginas_sin_inspeccionar", 0)
+        conflictos = diagnostico.get("conflictos_ocr", 0)
+        error_ocr = diagnostico.get("error_ocr_hibrido", "")
+        detalles = []
+        if pendientes:
+            detalles.append(
+                "páginas en imagen sin nómina confirmada: "
+                + ", ".join(str(p) for p in pendientes)
+            )
+        if sin_inspeccionar:
+            detalles.append(
+                f"{sin_inspeccionar} página(s) fuera del límite de inspección"
+            )
+        if conflictos:
+            detalles.append(
+                f"{conflictos} conflicto(s) entre texto nativo y OCR"
+            )
+        if error_ocr:
+            detalles.append("falló el OCR complementario: " + error_ocr)
+        alertas_salud.append({
+            "archivo": evidencia.get("archivo", ""),
+            "detalle": (
+                "COBERTURA PARCIAL: " + "; ".join(detalles)
+                + ". Revisar el PDF; no asumir nómina completa ni impago."
+            ),
+        })
     st.session_state["reporte_galant"] = {
         "firma": firma, "engine_release": VERSION,
         "certificados": certificados,

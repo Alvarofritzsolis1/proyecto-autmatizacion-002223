@@ -1,0 +1,76 @@
+name: GALANT - Contabo VPS Docker smoke
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - compose.yaml
+      - .dockerignore
+      - .env.example
+      - deploy/**
+      - requirements.txt
+      - app.py
+      - .github/workflows/contabo-vps-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contabo-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validar sintaxis de Compose sin publicar secretos
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+      - name: Validar instalador facil y Compose privado
+        run: |
+          bash -n deploy/galant-facil.sh
+          docker compose -f compose.yaml -f deploy/compose.private.yaml config --quiet
+          test "$(docker compose -f compose.yaml -f deploy/compose.private.yaml config --format json | python -c 'import json,sys; x=json.load(sys.stdin); print(x["services"]["galant"]["ports"][0]["host_ip"])')" = "127.0.0.1"
+      - name: Comprobar Caddyfile con credenciales solo de prueba
+        run: |
+          HASH="$(docker run --rm caddy:2-alpine caddy hash-password --plaintext 'PruebaTemporalNoEsUnaClaveReal')"
+          docker run --rm \
+            -e GALANT_DOMAIN=localhost \
+            -e GALANT_USER=usuario_prueba \
+            -e GALANT_AUTH_HASH="$HASH" \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy adapt --config /etc/caddy/Caddyfile > /dev/null
+      - name: Construir imagen real de GALANT con Tesseract y RapidOCR
+        run: docker build --tag galant-contabo:ci .
+      - name: Verificar importaciones OCR y lenguajes
+        run: |
+          docker run --rm galant-contabo:ci python -c "import fitz, pytesseract, cv2, rapidocr, onnxruntime, streamlit; print('GALANT OCR IMPORTS OK')"
+          docker run --rm galant-contabo:ci sh -c "tesseract --list-langs 2>&1 | grep -q '^spa$'"
+          docker run --rm galant-contabo:ci sh -c "tesseract --list-langs 2>&1 | grep -q '^eng$'"
+      - name: Ejecutar UI de GALANT (no solo health del servidor)
+        run: |
+          docker run --rm galant-contabo:ci python -c "from streamlit.testing.v1 import AppTest; a=AppTest.from_file('/app/app.py', default_timeout=60).run(); assert not a.exception, repr(a.exception); print('GALANT STREAMLIT UI OK')"
+      - name: Arrancar Streamlit aislado y comprobar health HTTP
+        run: |
+          docker run -d --name galant-contabo-smoke -p 127.0.0.1:18501:8501 galant-contabo:ci
+          for i in $(seq 1 35); do
+            if curl --fail --silent http://127.0.0.1:18501/_stcore/health >/dev/null; then
+              echo "GALANT UP"
+              exit 0
+            fi
+            sleep 3
+          done
+          docker logs galant-contabo-smoke
+          exit 1
+      - name: Arrancar Compose con volumen OCR y sistema de archivos protegido
+        run: |
+          docker tag galant-contabo:ci galant-galant:latest
+          docker compose up --detach --no-build --wait --wait-timeout 120 galant
+          docker compose exec -T galant python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5).read()"
+          docker compose exec -T galant python -c "import os; from pathlib import Path; p=Path.home()/'.cache'/'galant-ci-write-test'; p.parent.mkdir(parents=True, exist_ok=True); p.write_text('OK'); assert p.read_text()=='OK'; p.unlink(); print('PERSISTENT OCR CACHE WRITABLE')"
+      - name: Retirar contenedores de prueba
+        if: always()
+        run: |
+          docker compose down --remove-orphans || true
+          docker rm -f galant-contabo-smoke || true

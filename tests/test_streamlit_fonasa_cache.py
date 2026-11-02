@@ -48,7 +48,18 @@ def test_dias_ilegibles_no_se_muestran_como_texto_none():
 
 def test_version_nueva_identificable_en_pantalla():
     codigo = _codigo()
-    assert 'VERSION = "19.2-Texto-PDF-y-OCR"' in codigo
+    asignaciones = [
+        nodo for nodo in ast.parse(codigo).body
+        if isinstance(nodo, ast.Assign)
+        and any(
+            isinstance(objetivo, ast.Name) and objetivo.id == "VERSION"
+            for objetivo in nodo.targets
+        )
+    ]
+    assert len(asignaciones) == 1
+    version = ast.literal_eval(asignaciones[0].value)
+    assert isinstance(version, str) and "." in version and "-" in version
+    assert "cobertura_parcial" in codigo
     assert 'f"Control documental de contratistas · {VERSION} "' in codigo
 
 
@@ -101,3 +112,22 @@ def test_candidatos_de_salud_incluyen_isapre():
     assert '.startswith("isapre")' in codigo
     assert 'instituciones_candidatas=instituciones_salud' in codigo
     assert "construir_nomina_salud(" in codigo
+
+
+
+def test_web_vps_tiene_cargas_independientes_y_limites_compartidos():
+    codigo = _codigo()
+    assert 'key="galant_cotizaciones"' in codigo
+    assert 'key="galant_f301"' in codigo
+    assert 'archivos = list(archivos_subidos)' in codigo
+    assert "len(archivos) > MAX_ARCHIVOS" in codigo
+    assert "sum(a.size for a in archivos) > MAX_BYTES_TOTAL" in codigo
+    assert 'if nombre.lower().endswith(".pdf") and es_f301(data, nombre):' in codigo
+    assert "reporte_galant" in codigo
+
+
+def test_web_vps_no_desactiva_cors_o_xsrf():
+    codigo = _codigo()
+    assert "--server.enableCORS=false" not in codigo
+    assert "--server.enableXsrfProtection=false" not in codigo
+    assert 'VERSION = "19.3-VPS-OCR-Hibrido"' in codigo

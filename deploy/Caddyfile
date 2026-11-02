@@ -1,0 +1,9 @@
+# Caddy obtiene/renueva HTTPS cuando el DNS A apunta al VPS y 80/443 estan abiertos.
+# .env se crea SOLO en el VPS; nunca subir passwords ni hashes al GitHub publico.
+{$GALANT_DOMAIN} {
+    encode zstd gzip
+    basic_auth {
+        {$GALANT_USER} {$GALANT_AUTH_HASH}
+    }
+    reverse_proxy galant:8501
+}
