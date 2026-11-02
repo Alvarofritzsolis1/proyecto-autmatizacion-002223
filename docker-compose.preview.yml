@@ -1,0 +1,107 @@
+# GALANT 2.0 — ensayo AISLADO. No publicar en Internet ni cargar datos laborales reales.
+# Este archivo es INDEPENDIENTE del docker-compose.yml principal.
+name: galant2-preview
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: galant
+      POSTGRES_USER: galant
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en .env.preview}
+    volumes:
+      - preview_postgres_data:/var/lib/postgresql/data
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U galant -d galant"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+    mem_limit: 420m
+    security_opt: [no-new-privileges:true]
+    logging: &logging
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    restart: unless-stopped
+    environment: &backend_env
+      APP_SECRET: ${APP_SECRET:?Defina APP_SECRET en .env.preview}
+      DATABASE_URL: postgresql+psycopg://galant:${POSTGRES_PASSWORD}@db:5432/galant
+      DOCUMENT_DIR: /data/documents
+      OCR_LANG: ${OCR_LANG:-spa+eng}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      MAX_UPLOAD_MB: "15"
+      MAX_PDF_PAGES: "20"
+    volumes:
+      - ./preview-storage:/data/documents
+    networks: [private]
+    depends_on:
+      db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health',timeout=5)"]
+      interval: 15s
+      timeout: 7s
+      retries: 6
+      start_period: 30s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 500m
+    pids_limit: 140
+    logging: *logging
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    environment: *backend_env
+    volumes:
+      - ./preview-storage:/data/documents
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [private]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 850m
+    cpus: 1.0
+    pids_limit: 140
+    logging: *logging
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [private]
+    mem_limit: 120m
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      GALANT_SITE: ":80"
+    # SOLO en loopback del VPS; acceso por túnel SSH desde el computador personal.
+    ports: ["127.0.0.1:18502:80"]
+    volumes:
+      - ./infrastructure/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on: [frontend, api]
+    networks: [private, outbound]
+    mem_limit: 120m
+    security_opt: [no-new-privileges:true]
+    logging: *logging
+
+networks:
+  private: {internal: true}
+  outbound: {}
+
+volumes:
+  preview_postgres_data: {}

@@ -1,0 +1,11 @@
+{$GALANT_SITE} {
+  encode zstd gzip
+  @api path /api/*
+  handle @api { reverse_proxy api:8000 }
+  handle { reverse_proxy frontend:8080 }
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy same-origin
+    X-Frame-Options DENY
+  }
+}

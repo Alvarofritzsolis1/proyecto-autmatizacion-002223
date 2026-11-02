@@ -1,0 +1,63 @@
+name: GALANT 2.0 - Integración continua
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: apps/backend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m compileall -q app alembic
+      - run: OCR_LANG=eng python -m pytest -q
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: apps/frontend}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+
+  preview-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Revisar scripts de instalacion sin ejecutarlos
+        run: |
+          bash -n install.sh
+          bash -n scripts/preview-install.sh
+      - name: Verificar aislamiento de Docker Compose Preview
+        env:
+          APP_SECRET: ci_synthetic_secret_not_for_production
+          POSTGRES_PASSWORD: ci_synthetic_password_not_for_production
+        run: |
+          printf 'APP_SECRET=%s\nPOSTGRES_PASSWORD=%s\n' "$APP_SECRET" "$POSTGRES_PASSWORD" > .env.preview
+          docker compose --env-file .env.preview -f docker-compose.preview.yml config --quiet
+          python3 - <<'PY'
+          import json
+          import subprocess
+
+          cmd = ["docker", "compose", "--env-file", ".env.preview", "-f", "docker-compose.preview.yml", "config", "--format", "json"]
+          config = json.loads(subprocess.check_output(cmd, text=True))
+          assert config["name"] == "galant2-preview", "El proyecto de prueba debe ser independiente"
+          assert set(config["services"]) == {"db", "api", "worker", "frontend", "proxy"}
+          for name, service in config["services"].items():
+              ports = service.get("ports", [])
+              if name != "proxy":
+                  assert not ports, f"{name} no debe publicar puertos"
+              else:
+                  assert len(ports) == 1, "Proxy de ensayo debe publicar solo un puerto"
+                  binding = ports[0]
+                  assert str(binding.get("published")) == "18502"
+                  assert str(binding.get("target")) == "80"
+                  assert binding.get("host_ip") == "127.0.0.1", "Acceso solo desde loopback"
+          assert all("postgres_data" not in volume for volume in config.get("volumes", {}) if volume != "preview_postgres_data")
+          print("GALANT preview aislado: proyecto y puertos validados")
+          PY
+          rm -f .env.preview
